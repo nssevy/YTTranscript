@@ -6,6 +6,7 @@ import Foundation
 enum VTTParser {
     struct Segment {
         let start: TimeInterval
+        var end: TimeInterval
         var text: String
     }
 
@@ -19,6 +20,7 @@ enum VTTParser {
     static func parse(_ vtt: String) -> [Segment] {
         var cues: [Segment] = []
         var currentStart: TimeInterval?
+        var currentEnd: TimeInterval = 0
         var currentLines: [String] = []
 
         func flushCue() {
@@ -26,7 +28,7 @@ enum VTTParser {
                 let text = currentLines.joined(separator: " ")
                     .trimmingCharacters(in: .whitespaces)
                 if !text.isEmpty {
-                    cues.append(Segment(start: start, text: text))
+                    cues.append(Segment(start: start, end: currentEnd, text: text))
                 }
             }
             currentStart = nil
@@ -38,7 +40,12 @@ enum VTTParser {
 
             if line.contains("-->") {
                 flushCue()
-                currentStart = parseTimestamp(String(line.prefix(while: { $0 != " " })))
+                let parts = line.components(separatedBy: "-->")
+                currentStart = parseTimestamp(parts[0].trimmingCharacters(in: .whitespaces))
+                let endRaw = parts.count > 1
+                    ? parts[1].trimmingCharacters(in: .whitespaces)
+                    : ""
+                currentEnd = parseTimestamp(String(endRaw.prefix(while: { $0 != " " })))
                 continue
             }
             if line.isEmpty {
@@ -83,15 +90,25 @@ enum VTTParser {
         for cue in cues {
             var text = cue.text
             if !lastText.isEmpty {
-                if text == lastText { continue }
+                if text == lastText {
+                    // Cue purement répétée : on prolonge l'affichage du précédent.
+                    if !result.isEmpty { result[result.count - 1].end = cue.end }
+                    continue
+                }
                 if text.hasPrefix(lastText) {
                     text = String(text.dropFirst(lastText.count))
                         .trimmingCharacters(in: .whitespaces)
-                    if text.isEmpty { continue }
+                    if text.isEmpty {
+                        if !result.isEmpty { result[result.count - 1].end = cue.end }
+                        continue
+                    }
                 }
             }
-            lastText = cue.text
-            result.append(Segment(start: cue.start, text: text))
+            // On mémorise le texte RÉELLEMENT émis (pas le cue joint complet) :
+            // le report du cue suivant est toujours cette dernière ligne émise,
+            // ce qui permet au strip de préfixe de retirer le doublon déroulant.
+            lastText = text
+            result.append(Segment(start: cue.start, end: cue.end, text: text))
         }
         return result
     }
@@ -144,6 +161,61 @@ enum VTTParser {
         flushBlock()
 
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// Regroupe les segments bruts en blocs lisibles pour un .srt.
+    /// Les auto-subs YouTube produisent des cues qui se chevauchent et durent
+    /// parfois 10 ms (« flash ») : affichés tels quels, ils clignotent. On les
+    /// fusionne jusqu'à ~6 s ou une fin de phrase, borne dure à 8 s.
+    static func groupForSRT(_ segments: [Segment]) -> [Segment] {
+        var groups: [Segment] = []
+        for segment in segments {
+            if var last = groups.last {
+                let merged = Segment(
+                    start: last.start,
+                    end: max(last.end, segment.end),
+                    text: last.text + " " + segment.text
+                )
+                let duration = merged.end - merged.start
+                let endsSentence = last.text.hasSuffix(".") || last.text.hasSuffix("?")
+                    || last.text.hasSuffix("!")
+                // On coupe si le bloc courant est déjà « plein ».
+                if (duration >= 6 && endsSentence) || duration >= 8 || merged.text.count >= 200 {
+                    groups.append(segment)
+                } else {
+                    last = merged
+                    groups[groups.count - 1] = last
+                }
+            } else {
+                groups.append(segment)
+            }
+        }
+        return groups
+    }
+
+    /// Fichier .srt à partir des blocs regroupés et de leurs textes traduits
+    /// (même ordre, même nombre). Timestamps d'origine conservés.
+    static func renderSRT(segments: [Segment], translatedTexts: [String]) -> String {
+        var blocks: [String] = []
+        for (index, segment) in segments.enumerated() {
+            let text = index < translatedTexts.count ? translatedTexts[index] : segment.text
+            // Fin manquante ou incohérente → 2 s minimum d'affichage.
+            let end = segment.end > segment.start + 0.2 ? segment.end : segment.start + 2
+            blocks.append("""
+            \(index + 1)
+            \(formatSRTTimestamp(segment.start)) --> \(formatSRTTimestamp(end))
+            \(text)
+            """)
+        }
+        return blocks.joined(separator: "\n\n") + "\n"
+    }
+
+    /// "HH:MM:SS,mmm" (format SRT).
+    static func formatSRTTimestamp(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds)
+        let millis = Int((seconds - Double(total)) * 1000)
+        return String(format: "%02d:%02d:%02d,%03d",
+                      total / 3600, (total % 3600) / 60, total % 60, millis)
     }
 
     /// "[mm:ss]" en dessous d'une heure, "[h:mm:ss]" au-delà.

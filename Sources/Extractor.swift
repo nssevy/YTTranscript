@@ -11,6 +11,12 @@ enum ExtractionError: Error {
 struct ExtractionResult {
     let fileURL: URL
     let transcriptText: String
+    /// Segments nettoyés (timestamps + texte), pour générer le .srt traduit.
+    let segments: [VTTParser.Segment]
+    /// Vidéo en anglais → candidate à la traduction française.
+    let sourceIsEnglish: Bool
+    /// Sous-titres traduits en français (.srt), écrits après coup par l'UI.
+    var srtURL: URL?
 }
 
 struct Extractor {
@@ -82,12 +88,21 @@ struct Extractor {
         """
         text += VTTParser.render(segments: segments, chapters: chapters)
 
-        // 5. Écriture du fichier.
-        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
-        let fileURL = outputDir.appendingPathComponent(sanitizeFilename(title) + ".txt")
+        // 5. Écriture : un dossier par vidéo, .txt à l'intérieur.
+        let baseName = sanitizeFilename(title)
+        let videoDir = outputDir.appendingPathComponent(baseName)
+        try FileManager.default.createDirectory(at: videoDir, withIntermediateDirectories: true)
+        let fileURL = videoDir.appendingPathComponent(baseName + ".txt")
         try text.write(to: fileURL, atomically: true, encoding: .utf8)
 
-        return ExtractionResult(fileURL: fileURL, transcriptText: text)
+        let sourceLang = videoLang ?? track.lang
+        return ExtractionResult(
+            fileURL: fileURL,
+            transcriptText: text,
+            segments: segments,
+            sourceIsEnglish: sourceLang.hasPrefix("en"),
+            srtURL: nil
+        )
     }
 
     // MARK: - Choix de piste
@@ -179,8 +194,8 @@ struct Extractor {
 
         return (
             process.terminationStatus,
-            String(data: outData ?? Data(), encoding: .utf8) ?? "",
-            String(data: errData ?? Data(), encoding: .utf8) ?? ""
+            String(data: outData, encoding: .utf8) ?? "",
+            String(data: errData, encoding: .utf8) ?? ""
         )
     }
 }

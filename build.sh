@@ -34,7 +34,7 @@ cat > "$OVERLAY" <<EOF
 EOF
 
 swiftc -O -parse-as-library \
-  -target arm64-apple-macos13.0 \
+  -target arm64-apple-macos15.0 \
   -Xcc -ivfsoverlay -Xcc "$OVERLAY" \
   -vfsoverlay "$OVERLAY" \
   Sources/*.swift \

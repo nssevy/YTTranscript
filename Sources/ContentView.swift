@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Translation
 
 struct ContentView: View {
     @AppStorage("outputDir") private var outputDir =
@@ -8,8 +9,12 @@ struct ContentView: View {
 
     @State private var urlText = ""
     @State private var isWorking = false
+    @State private var isTranslating = false
     @State private var errorMessage: String?
+    @State private var translationNote: String?
     @State private var result: ExtractionResult?
+    /// Non-nil → déclenche .translationTask (traduction en→fr on-device).
+    @State private var translationConfig: TranslationSession.Configuration?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -47,6 +52,15 @@ struct ContentView: View {
                 }
             }
 
+            if isTranslating {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Traduction française en cours…")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if let errorMessage {
                 Text(errorMessage)
                     .foregroundStyle(.red)
@@ -58,12 +72,26 @@ struct ContentView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
-                    Text(result.fileURL.lastPathComponent)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(result.fileURL.lastPathComponent)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if let srtURL = result.srtURL {
+                            Text(srtURL.lastPathComponent)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        } else if let translationNote {
+                            Text(translationNote)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
                     Spacer()
                     Button("Reveal in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([result.fileURL])
+                        let files = [result.fileURL] + (result.srtURL.map { [$0] } ?? [])
+                        NSWorkspace.shared.activateFileViewerSelecting(files)
                     }
                     Button("Copier") {
                         let pasteboard = NSPasteboard.general
@@ -74,6 +102,9 @@ struct ContentView: View {
             }
         }
         .padding(20)
+        .translationTask(translationConfig) { session in
+            await translateAndWriteSRT(session: session)
+        }
     }
 
     private var abbreviatedOutputDir: String {
@@ -89,7 +120,9 @@ struct ContentView: View {
 
         isWorking = true
         errorMessage = nil
+        translationNote = nil
         result = nil
+        translationConfig = nil
         let destination = URL(fileURLWithPath: outputDir)
 
         Task.detached(priority: .userInitiated) {
@@ -101,12 +134,55 @@ struct ContentView: View {
                 switch outcome {
                 case .success(let extraction):
                     result = extraction
+                    if extraction.sourceIsEnglish, !extraction.segments.isEmpty {
+                        // Déclenche la traduction on-device (voir .translationTask).
+                        isTranslating = true
+                        translationConfig = TranslationSession.Configuration(
+                            source: Locale.Language(identifier: "en"),
+                            target: Locale.Language(identifier: "fr")
+                        )
+                    }
                 case .failure(ExtractionError.ytDlpMissing):
                     errorMessage = "yt-dlp est introuvable. Installez-le avec : brew install yt-dlp ffmpeg"
                 case .failure:
                     errorMessage = "Cette vidéo est invalide ou ne correspond pas aux critères requis."
                 }
             }
+        }
+    }
+
+    /// Traduit les segments en français (framework Translation, on-device)
+    /// et écrit le .srt à côté du .txt. Échec non bloquant.
+    private func translateAndWriteSRT(session: TranslationSession) async {
+        defer {
+            isTranslating = false
+            translationConfig = nil
+        }
+        guard let extraction = result else { return }
+
+        do {
+            // Télécharge le modèle en→fr au premier usage (dialogue système).
+            try await session.prepareTranslation()
+
+            // Regroupe en blocs lisibles avant de traduire (évite les cues
+            // « flash » de 10 ms des auto-subs YouTube).
+            let blocks = VTTParser.groupForSRT(extraction.segments)
+            let requests = blocks.map {
+                TranslationSession.Request(sourceText: $0.text)
+            }
+            let responses = try await session.translations(from: requests)
+            let translated = responses.map(\.targetText)
+
+            let srt = VTTParser.renderSRT(
+                segments: blocks,
+                translatedTexts: translated
+            )
+            let srtURL = extraction.fileURL.deletingPathExtension()
+                .appendingPathExtension("fr.srt")
+            try srt.write(to: srtURL, atomically: true, encoding: .utf8)
+            result?.srtURL = srtURL
+        } catch {
+            translationNote = "Traduction française indisponible (\(error.localizedDescription))"
         }
     }
 
