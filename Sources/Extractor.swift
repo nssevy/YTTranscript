@@ -22,6 +22,39 @@ struct ExtractionResult {
 struct Extractor {
     static let ytDlpPath = "/opt/homebrew/bin/yt-dlp"
 
+    static var isYtDlpInstalled: Bool {
+        FileManager.default.isExecutableFile(atPath: ytDlpPath)
+    }
+
+    /// Version de yt-dlp (ex. "2026.06.09"), ou nil si absent/illisible.
+    static func ytDlpVersion() -> String? {
+        guard isYtDlpInstalled else { return nil }
+        let (status, out, _) = runProcess(ytDlpPath, ["--version"])
+        guard status == 0 else { return nil }
+        let version = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return version.isEmpty ? nil : version
+    }
+
+    /// Met à jour yt-dlp. Synchrone : à appeler hors du main thread.
+    /// yt-dlp est installé par Homebrew, qui refuse l'auto-update `-U` ;
+    /// on passe donc par `brew upgrade yt-dlp`. Retourne un message à afficher.
+    static func updateYtDlp() -> String {
+        guard isYtDlpInstalled else {
+            return "yt-dlp est introuvable. Installez-le avec : brew install yt-dlp ffmpeg"
+        }
+        let brewPath = "/opt/homebrew/bin/brew"
+        guard FileManager.default.isExecutableFile(atPath: brewPath) else {
+            return "Homebrew introuvable. Mettez à jour manuellement : brew upgrade yt-dlp"
+        }
+        let (status, _, err) = runProcess(brewPath, ["upgrade", "yt-dlp"])
+        if status != 0 {
+            let detail = err.trimmingCharacters(in: .whitespacesAndNewlines)
+            return "Échec de la mise à jour." + (detail.isEmpty ? "" : "\n\(detail)")
+        }
+        let version = ytDlpVersion().map { " (yt-dlp \($0))" } ?? ""
+        return "yt-dlp est à jour\(version)."
+    }
+
     /// Extrait les sous-titres de la vidéo et écrit le .txt dans `outputDir`.
     /// Synchrone et bloquant : à appeler hors du main thread.
     static func extract(videoURL: String, outputDir: URL) throws -> ExtractionResult {
