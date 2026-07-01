@@ -163,10 +163,14 @@ enum VTTParser {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    /// Regroupe les segments bruts en blocs lisibles pour un .srt.
+    /// Longueur cible d'un sous-titre : 2 lignes de ~42 caractères (norme lisible).
+    private static let srtMaxChars = 84
+    private static let srtLineWidth = 42
+
+    /// Regroupe les segments bruts en blocs courts, lisibles à l'écran.
     /// Les auto-subs YouTube produisent des cues qui se chevauchent et durent
-    /// parfois 10 ms (« flash ») : affichés tels quels, ils clignotent. On les
-    /// fusionne jusqu'à ~6 s ou une fin de phrase, borne dure à 8 s.
+    /// parfois 10 ms (« flash »). On fusionne jusqu'à ~84 caractères / une fin
+    /// de phrase, borne dure à 6 s, pour ne jamais déborder l'écran.
     static func groupForSRT(_ segments: [Segment]) -> [Segment] {
         var groups: [Segment] = []
         for segment in segments {
@@ -179,8 +183,8 @@ enum VTTParser {
                 let duration = merged.end - merged.start
                 let endsSentence = last.text.hasSuffix(".") || last.text.hasSuffix("?")
                     || last.text.hasSuffix("!")
-                // On coupe si le bloc courant est déjà « plein ».
-                if (duration >= 6 && endsSentence) || duration >= 8 || merged.text.count >= 200 {
+                // On coupe dès que le bloc est plein ou en fin de phrase.
+                if merged.text.count > srtMaxChars || duration >= 6 || endsSentence {
                     groups.append(segment)
                 } else {
                     last = merged
@@ -204,10 +208,30 @@ enum VTTParser {
             blocks.append("""
             \(index + 1)
             \(formatSRTTimestamp(segment.start)) --> \(formatSRTTimestamp(end))
-            \(text)
+            \(wrapLines(text))
             """)
         }
         return blocks.joined(separator: "\n\n") + "\n"
+    }
+
+    /// Replie un texte sur au plus 2 lignes d'environ 42 caractères,
+    /// sans jamais couper un mot.
+    private static func wrapLines(_ text: String) -> String {
+        let words = text.split(separator: " ")
+        var lines: [String] = []
+        var current = ""
+        for word in words {
+            if current.isEmpty {
+                current = String(word)
+            } else if current.count + 1 + word.count <= srtLineWidth {
+                current += " " + word
+            } else {
+                lines.append(current)
+                current = String(word)
+            }
+        }
+        if !current.isEmpty { lines.append(current) }
+        return lines.joined(separator: "\n")
     }
 
     /// "HH:MM:SS,mmm" (format SRT).
