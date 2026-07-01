@@ -8,6 +8,7 @@ struct ContentView: View {
             .appendingPathComponent("Documents/Transcripts").path
     /// Langue cible de la traduction .srt (code, ex. "fr").
     @AppStorage("targetLang") private var targetLang = "fr"
+    @Environment(\.openWindow) private var openWindow
 
     @State private var urlText = ""
     @State private var isWorking = false
@@ -150,20 +151,15 @@ struct ContentView: View {
     private var recentsSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Récents").font(.caption).foregroundStyle(.secondary)
-            ForEach(recents) { entry in
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.text")
-                        .foregroundStyle(.secondary)
-                    Text(entry.title)
-                        .font(.callout)
-                        .lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Button("Ouvrir") {
-                        NSWorkspace.shared.activateFileViewerSelecting(entry.finderFiles)
-                    }
-                    .font(.caption)
-                    .buttonStyle(.link)
+            ForEach(recents.prefix(5)) { entry in
+                RecentRow(entry: entry)
+            }
+            if recents.count > 5 {
+                Button("Voir tout l'historique (\(recents.count))") {
+                    openWindow(id: "history")
                 }
+                .font(.caption)
+                .buttonStyle(.link)
             }
         }
     }

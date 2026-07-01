@@ -37,12 +37,15 @@ struct RecentEntry: Codable, Identifiable, Hashable {
     var srtURL: URL? { srtPath.map { URL(fileURLWithPath: $0) } }
     /// Fichiers à sélectionner dans le Finder.
     var finderFiles: [URL] { [txtURL] + (srtURL.map { [$0] } ?? []) }
+
+    /// Le fichier .txt existe-t-il encore sur le disque ? (false = supprimé)
+    var exists: Bool { FileManager.default.fileExists(atPath: txtPath) }
 }
 
 /// Persiste les dernières extractions dans UserDefaults (JSON).
 enum RecentStore {
     private static let key = "recentExtractions"
-    private static let maxCount = 8
+    private static let maxCount = 200
 
     static func load() -> [RecentEntry] {
         guard let data = UserDefaults.standard.data(forKey: key),
@@ -51,14 +54,25 @@ enum RecentStore {
         return entries
     }
 
+    private static func save(_ entries: [RecentEntry]) {
+        if let data = try? JSONEncoder().encode(entries) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
     /// Ajoute une entrée en tête, dédoublonne par chemin, borne la taille.
     static func add(_ entry: RecentEntry) -> [RecentEntry] {
         var entries = load().filter { $0.txtPath != entry.txtPath }
         entries.insert(entry, at: 0)
         entries = Array(entries.prefix(maxCount))
-        if let data = try? JSONEncoder().encode(entries) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
+        save(entries)
+        return entries
+    }
+
+    /// Retire une entrée de l'historique (n'efface pas les fichiers du disque).
+    static func remove(_ id: String) -> [RecentEntry] {
+        let entries = load().filter { $0.id != id }
+        save(entries)
         return entries
     }
 }
