@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var urlText = ""
     @State private var isWorking = false
     @State private var isTranslating = false
+    @State private var translationProgress: (done: Int, total: Int) = (0, 0)
     @State private var errorMessage: String?
     @State private var translationNote: String?
     @State private var statusNote: String?
@@ -65,7 +66,13 @@ struct ContentView: View {
                 progressRow("Extraction en cours…")
             }
             if isTranslating {
-                progressRow("Traduction (\(target.name)) en cours…")
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(translationLabel).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Annuler", action: cancelTranslation)
+                        .font(.caption)
+                }
             }
 
             if let errorMessage {
@@ -96,6 +103,14 @@ struct ContentView: View {
     }
 
     // MARK: - Sous-vues
+
+    private var translationLabel: String {
+        let (done, total) = translationProgress
+        if total > 0 {
+            return "Traduction (\(target.name)) — \(done)/\(total) blocs"
+        }
+        return "Traduction (\(target.name)) en cours…"
+    }
 
     private func progressRow(_ label: String) -> some View {
         HStack(spacing: 8) {
@@ -230,10 +245,13 @@ struct ContentView: View {
 
     /// Traduit les segments dans la langue cible (framework Translation,
     /// on-device) et écrit le .srt à côté du .txt. Échec non bloquant.
+    /// Traité par lots pour afficher la progression et permettre l'annulation
+    /// (bouton Annuler → translationConfig = nil → la tâche est annulée).
     private func translateAndWriteSRT(session: TranslationSession) async {
         defer {
             isTranslating = false
             translationConfig = nil
+            translationProgress = (0, 0)
         }
         guard let extraction = result else { return }
 
@@ -243,9 +261,24 @@ struct ContentView: View {
             // Regroupe en blocs lisibles avant de traduire (évite les cues
             // « flash » de 10 ms des auto-subs YouTube).
             let blocks = VTTParser.groupForSRT(extraction.segments)
-            let requests = blocks.map { TranslationSession.Request(sourceText: $0.text) }
-            let responses = try await session.translations(from: requests)
-            let translated = responses.map(\.targetText)
+            translationProgress = (0, blocks.count)
+
+            var translated: [String] = []
+            translated.reserveCapacity(blocks.count)
+            let batchSize = 40
+            var index = 0
+            while index < blocks.count {
+                if Task.isCancelled {
+                    translationNote = "Traduction annulée."
+                    return
+                }
+                let slice = Array(blocks[index..<min(index + batchSize, blocks.count)])
+                let requests = slice.map { TranslationSession.Request(sourceText: $0.text) }
+                let responses = try await session.translations(from: requests)
+                translated.append(contentsOf: responses.map(\.targetText))
+                index += slice.count
+                translationProgress = (translated.count, blocks.count)
+            }
 
             let srt = VTTParser.renderSRT(segments: blocks, translatedTexts: translated)
             let srtURL = extraction.fileURL.deletingPathExtension()
@@ -253,9 +286,19 @@ struct ContentView: View {
             try srt.write(to: srtURL, atomically: true, encoding: .utf8)
             result?.srtURL = srtURL
             if let updated = result { recordRecent(updated) }
+        } catch is CancellationError {
+            translationNote = "Traduction annulée."
         } catch {
             translationNote = "Traduction indisponible (\(error.localizedDescription))"
         }
+    }
+
+    private func cancelTranslation() {
+        // Annule la tâche liée à .translationTask et remet l'UI à zéro.
+        translationConfig = nil
+        isTranslating = false
+        translationProgress = (0, 0)
+        translationNote = "Traduction annulée."
     }
 
     private func recordRecent(_ extraction: ExtractionResult) {
