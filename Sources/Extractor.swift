@@ -139,10 +139,11 @@ struct Extractor {
 
     // MARK: - Utilitaires
 
-    /// Format "hh:mm" imposé par le spec pour l'en-tête.
+    /// Durée pour l'en-tête : "mm:ss", ou "h:mm:ss" au-delà d'une heure
+    /// (même format que les timestamps du transcript).
     static func formatDurationHHMM(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded())
-        return String(format: "%02d:%02d", total / 3600, (total % 3600) / 60)
+        // Troncature (pas d'arrondi) pour coller à la durée affichée par YouTube.
+        VTTParser.formatTimestamp(seconds.rounded(.down))
     }
 
     /// Retire les caractères interdits dans un nom de fichier macOS/Finder.
