@@ -8,8 +8,9 @@ struct ContentView: View {
             .appendingPathComponent("Documents/Transcripts").path
     /// Langue cible de la traduction .srt (code, ex. "fr").
     @AppStorage("targetLang") private var targetLang = "fr"
-    @Environment(\.openWindow) private var openWindow
 
+    /// true → l'écran historique remplace l'écran principal (même fenêtre).
+    @State private var showHistory = false
     @State private var urlText = ""
     @State private var isWorking = false
     @State private var isTranslating = false
@@ -39,6 +40,29 @@ struct ContentView: View {
     private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     var body: some View {
+        // Les modificateurs (timer, translationTask…) restent sur le Group :
+        // la traduction continue même quand l'écran historique est affiché.
+        Group {
+            if showHistory {
+                HistoryView(onBack: { showHistory = false })
+            } else {
+                mainScreen
+            }
+        }
+        .frame(minWidth: 480)
+        .onAppear {
+            prefillFromClipboard()
+            refreshRecents()
+        }
+        .onReceive(refreshTimer) { _ in refreshRecents() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in refreshRecents() }
+        .translationTask(translationConfig) { session in
+            await translateAndWriteSRT(session: session)
+        }
+    }
+
+    private var mainScreen: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Extracteur de sous-titres YouTube")
                 .font(.headline)
@@ -142,17 +166,6 @@ struct ContentView: View {
             footer
         }
         .padding(20)
-        .frame(minWidth: 480)
-        .onAppear {
-            prefillFromClipboard()
-            refreshRecents()
-        }
-        .onReceive(refreshTimer) { _ in refreshRecents() }
-        .onReceive(NotificationCenter.default.publisher(
-            for: NSApplication.didBecomeActiveNotification)) { _ in refreshRecents() }
-        .translationTask(translationConfig) { session in
-            await translateAndWriteSRT(session: session)
-        }
     }
 
     // MARK: - Sous-vues
@@ -208,7 +221,7 @@ struct ContentView: View {
             }
             if recents.count > 5 {
                 Button("Voir tout l'historique (\(recents.count))") {
-                    openWindow(id: "history")
+                    showHistory = true
                 }
                 .font(.caption)
                 .buttonStyle(.link)
@@ -218,6 +231,12 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
+            Button {
+                showHistory = true
+            } label: {
+                Label("Historique", systemImage: "clock.arrow.circlepath")
+            }
+            .font(.caption)
             Button("Mettre à jour yt-dlp", action: updateYtDlp)
                 .font(.caption)
                 .disabled(isWorking)

@@ -45,8 +45,12 @@ struct RecentRow: View {
     }
 }
 
-/// Fenêtre séparée listant tout l'historique des extractions.
+/// Écran d'historique affiché DANS la fenêtre principale (pas de fenêtre
+/// séparée) : ContentView bascule entre saisie et historique.
 struct HistoryView: View {
+    /// Retour à l'écran principal.
+    let onBack: () -> Void
+
     @State private var entries: [RecentEntry] = RecentStore.load()
     /// Voir ContentView.missingIDs : ce state change à la suppression d'un
     /// fichier et force le redessin (des entrées égales ne suffisent pas).
@@ -61,6 +65,9 @@ struct HistoryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
+                Button(action: onBack) {
+                    Label("Retour", systemImage: "chevron.left")
+                }
                 Text("Historique des extractions")
                     .font(.headline)
                 Spacer()
