@@ -5,19 +5,23 @@ import AppKit
 /// bouton Ouvrir (désactivé si absent) et éventuel bouton Retirer.
 struct RecentRow: View {
     let entry: RecentEntry
+    // Passé par le parent (recalculé à chaque refresh) : sans ce paramètre,
+    // SwiftUI mémoïse la ligne tant que `entry` est identique et n'affiche
+    // jamais la suppression du fichier.
+    let exists: Bool
     var onRemove: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: entry.exists ? "doc.text" : "doc.text")
-                .foregroundStyle(entry.exists ? Color.secondary : Color.red)
+            Image(systemName: "doc.text")
+                .foregroundStyle(exists ? Color.secondary : Color.red)
             Text(entry.title)
                 .font(.callout)
-                .strikethrough(!entry.exists)
-                .foregroundStyle(entry.exists ? Color.primary : Color.red)
+                .strikethrough(!exists)
+                .foregroundStyle(exists ? Color.primary : Color.red)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if !entry.exists {
+            if !exists {
                 Text("supprimé")
                     .font(.caption2)
                     .foregroundStyle(.red)
@@ -28,7 +32,7 @@ struct RecentRow: View {
             }
             .font(.caption)
             .buttonStyle(.link)
-            .disabled(!entry.exists)
+            .disabled(!exists)
             if let onRemove {
                 Button(role: .destructive, action: onRemove) {
                     Image(systemName: "xmark.circle")
@@ -64,7 +68,7 @@ struct HistoryView: View {
             } else {
                 List {
                     ForEach(entries) { entry in
-                        RecentRow(entry: entry) {
+                        RecentRow(entry: entry, exists: entry.exists) {
                             entries = RecentStore.remove(entry.id)
                         }
                     }

@@ -159,7 +159,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Récents").font(.caption).foregroundStyle(.secondary)
             ForEach(recents.prefix(5)) { entry in
-                RecentRow(entry: entry)
+                RecentRow(entry: entry, exists: entry.exists)
             }
             if recents.count > 5 {
                 Button("Voir tout l'historique (\(recents.count))") {
