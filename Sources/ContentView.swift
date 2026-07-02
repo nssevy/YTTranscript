@@ -42,6 +42,9 @@ struct ContentView: View {
                     .textFieldStyle(.roundedBorder)
                     .disabled(isWorking)
                     .onSubmit(startExtraction)
+                Button("Coller", action: pasteFromClipboard)
+                    .disabled(isWorking)
+                    .help("Coller le contenu du presse-papier")
                 Button("Extraire", action: startExtraction)
                     .keyboardShortcut(.defaultAction)
                     .disabled(isWorking || urlText.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -201,6 +204,14 @@ struct ContentView: View {
         return outputDir.hasPrefix(home)
             ? "~" + outputDir.dropFirst(home.count)
             : outputDir
+    }
+
+    /// Remplace le champ URL par le contenu du presse-papier (bouton Coller).
+    private func pasteFromClipboard() {
+        guard let clip = NSPasteboard.general.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !clip.isEmpty
+        else { return }
+        urlText = clip
     }
 
     /// Pré-remplit le champ avec l'URL du presse-papier si c'est un lien YouTube.
