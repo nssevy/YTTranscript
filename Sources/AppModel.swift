@@ -31,6 +31,8 @@ struct RecentEntry: Codable, Identifiable, Hashable {
     let txtPath: String
     let srtPath: String?
     let date: Date
+    /// ID YouTube (ex. "dQw4w9WgXcQ"), optionnel pour les entrées historiques.
+    var videoID: String?
     var id: String { txtPath }
 
     var txtURL: URL { URL(fileURLWithPath: txtPath) }
@@ -40,6 +42,24 @@ struct RecentEntry: Codable, Identifiable, Hashable {
 
     /// Le fichier .txt existe-t-il encore sur le disque ? (false = supprimé)
     var exists: Bool { FileManager.default.fileExists(atPath: txtPath) }
+}
+
+/// Extrait l'ID vidéo d'une URL YouTube (watch?v=, youtu.be/, shorts/, embed/).
+/// nil si non reconnu — dans ce cas la détection de doublon est simplement ignorée.
+func youtubeVideoID(from url: String) -> String? {
+    let patterns = [
+        "[?&]v=([A-Za-z0-9_-]{6,})",
+        "youtu\\.be/([A-Za-z0-9_-]{6,})",
+        "/(?:shorts|embed|live)/([A-Za-z0-9_-]{6,})",
+    ]
+    for pattern in patterns {
+        if let match = url.range(of: pattern, options: .regularExpression) {
+            let id = String(url[match])
+                .replacingOccurrences(of: "^.*[=/]", with: "", options: .regularExpression)
+            if !id.isEmpty { return id }
+        }
+    }
+    return nil
 }
 
 /// Persiste les dernières extractions dans UserDefaults (JSON).

@@ -17,6 +17,10 @@ struct ContentView: View {
     @State private var errorMessage: String?
     @State private var translationNote: String?
     @State private var statusNote: String?
+    /// Entrée existante détectée pour l'URL demandée → avertissement doublon.
+    @State private var duplicateEntry: RecentEntry?
+    /// ID YouTube de l'extraction en cours, mémorisé dans l'historique.
+    @State private var currentVideoID: String?
     @State private var result: ExtractionResult?
     @State private var recents: [RecentEntry] = RecentStore.load()
     /// IDs des entrées dont le fichier a disparu du disque. C'est CE state qui
@@ -92,6 +96,22 @@ struct ContentView: View {
                     .foregroundStyle(.red)
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let duplicateEntry {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("Cette vidéo a déjà été extraite.")
+                        .font(.callout)
+                    Spacer()
+                    Button("Ouvrir") {
+                        NSWorkspace.shared.activateFileViewerSelecting(duplicateEntry.finderFiles)
+                    }
+                    Button("Extraire quand même") {
+                        startExtraction(force: true)
+                    }
+                }
             }
 
             if let result {
@@ -225,14 +245,27 @@ struct ContentView: View {
     }
 
     private func startExtraction() {
+        startExtraction(force: false)
+    }
+
+    private func startExtraction(force: Bool) {
         let url = urlText.trimmingCharacters(in: .whitespaces)
         guard !url.isEmpty, !isWorking else { return }
+
+        // Doublon : même ID vidéo déjà extrait et fichiers toujours sur disque.
+        duplicateEntry = nil
+        if !force, let videoID = youtubeVideoID(from: url),
+           let existing = recents.first(where: { $0.videoID == videoID && $0.exists }) {
+            duplicateEntry = existing
+            return
+        }
 
         isWorking = true
         errorMessage = nil
         translationNote = nil
         statusNote = nil
         result = nil
+        currentVideoID = youtubeVideoID(from: url)
         let destination = URL(fileURLWithPath: outputDir)
 
         Task.detached(priority: .userInitiated) {
@@ -348,7 +381,8 @@ struct ContentView: View {
             title: extraction.fileURL.deletingPathExtension().lastPathComponent,
             txtPath: extraction.fileURL.path,
             srtPath: extraction.srtURL?.path,
-            date: Date()
+            date: Date(),
+            videoID: currentVideoID
         )
         recents = RecentStore.add(entry)
     }

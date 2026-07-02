@@ -28,6 +28,7 @@ struct Tests {
         testDedupeRolling()
         testGroupForSRT()
         testSanitizeFilename()
+        testYoutubeVideoID()
 
         print("")
         if failures == 0 {
@@ -105,6 +106,20 @@ struct Tests {
         check(groups.allSatisfy { $0.end - $0.start <= 6 }, "chaque bloc dure au plus ~6 s")
         // Couverture temporelle continue.
         checkEqual(groups.first?.start, 0, "commence à 0")
+    }
+
+    static func testYoutubeVideoID() {
+        print("ID vidéo YouTube")
+        checkEqual(youtubeVideoID(from: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+                   "dQw4w9WgXcQ", "watch?v=")
+        checkEqual(youtubeVideoID(from: "https://youtu.be/dQw4w9WgXcQ?t=42"),
+                   "dQw4w9WgXcQ", "youtu.be avec paramètre")
+        checkEqual(youtubeVideoID(from: "https://www.youtube.com/shorts/abc123XYZ_-"),
+                   "abc123XYZ_-", "shorts")
+        checkEqual(youtubeVideoID(from: "https://www.youtube.com/watch?list=PL1&v=XJC5WB2Bwrc"),
+                   "XJC5WB2Bwrc", "v= en second paramètre")
+        checkEqual(youtubeVideoID(from: "https://example.com/pas-youtube"),
+                   nil, "URL non reconnue → nil")
     }
 
     static func testSanitizeFilename() {
