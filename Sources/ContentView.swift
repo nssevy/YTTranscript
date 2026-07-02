@@ -19,6 +19,10 @@ struct ContentView: View {
     @State private var statusNote: String?
     @State private var result: ExtractionResult?
     @State private var recents: [RecentEntry] = RecentStore.load()
+    /// IDs des entrées dont le fichier a disparu du disque. C'est CE state qui
+    /// change à la suppression et déclenche le redessin : `entry.exists` lu dans
+    /// le body ne suffit pas, car recharger des récents égaux ne réévalue rien.
+    @State private var missingIDs: Set<String> = []
     /// Non-nil → déclenche .translationTask (traduction en→cible on-device).
     @State private var translationConfig: TranslationSession.Configuration?
 
@@ -101,7 +105,10 @@ struct ContentView: View {
         }
         .padding(20)
         .frame(minWidth: 480)
-        .onAppear(perform: prefillFromClipboard)
+        .onAppear {
+            prefillFromClipboard()
+            refreshRecents()
+        }
         .onReceive(refreshTimer) { _ in refreshRecents() }
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification)) { _ in refreshRecents() }
@@ -159,7 +166,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Récents").font(.caption).foregroundStyle(.secondary)
             ForEach(recents.prefix(5)) { entry in
-                RecentRow(entry: entry, exists: entry.exists)
+                RecentRow(entry: entry, exists: !missingIDs.contains(entry.id))
             }
             if recents.count > 5 {
                 Button("Voir tout l'historique (\(recents.count))") {
@@ -215,7 +222,6 @@ struct ContentView: View {
         translationNote = nil
         statusNote = nil
         result = nil
-        translationConfig = nil
         let destination = URL(fileURLWithPath: outputDir)
 
         Task.detached(priority: .userInitiated) {
@@ -232,10 +238,7 @@ struct ContentView: View {
                     if extraction.sourceIsEnglish, targetLang != "en",
                        !extraction.segments.isEmpty {
                         isTranslating = true
-                        translationConfig = TranslationSession.Configuration(
-                            source: Locale.Language(identifier: "en"),
-                            target: Locale.Language(identifier: targetLang)
-                        )
+                        startTranslationTask()
                     }
                 case .failure(ExtractionError.ytDlpMissing):
                     errorMessage = "yt-dlp est introuvable. Installez-le avec : brew install yt-dlp ffmpeg"
@@ -246,17 +249,36 @@ struct ContentView: View {
         }
     }
 
+    /// (Re)déclenche la tâche liée à .translationTask. Piège SwiftUI : la tâche
+    /// ne repart que si la configuration CHANGE. Recréer une config identique
+    /// (mêmes langues) est ignoré — la 2e vidéo ne se traduisait jamais.
+    /// Même paire de langues → config.invalidate() ; sinon nouvelle config.
+    private func startTranslationTask() {
+        let targetLanguage = Locale.Language(identifier: targetLang)
+        if translationConfig != nil, translationConfig?.target == targetLanguage {
+            translationConfig?.invalidate()
+        } else {
+            translationConfig = TranslationSession.Configuration(
+                source: Locale.Language(identifier: "en"),
+                target: targetLanguage
+            )
+        }
+    }
+
     /// Traduit les segments dans la langue cible (framework Translation,
     /// on-device) et écrit le .srt à côté du .txt. Échec non bloquant.
     /// Traité par lots pour afficher la progression et permettre l'annulation
     /// (bouton Annuler → translationConfig = nil → la tâche est annulée).
     private func translateAndWriteSRT(session: TranslationSession) async {
+        // NB : ne PAS remettre translationConfig à nil ici — elle reste en place
+        // et sera invalidée (config.invalidate()) pour la traduction suivante.
         defer {
             isTranslating = false
-            translationConfig = nil
             translationProgress = (0, 0)
         }
-        guard let extraction = result else { return }
+        // La tâche se déclenche aussi au premier rendu si une config existe
+        // déjà : sans extraction en attente, ne rien faire.
+        guard isTranslating, let extraction = result else { return }
 
         do {
             try await session.prepareTranslation()
@@ -304,9 +326,10 @@ struct ContentView: View {
         translationNote = "Traduction annulée."
     }
 
-    /// Recharge les récents pour réévaluer l'existence des fichiers sur disque.
+    /// Recharge les récents et recalcule quels fichiers manquent sur le disque.
     private func refreshRecents() {
         recents = RecentStore.load()
+        missingIDs = Set(recents.filter { !$0.exists }.map(\.id))
     }
 
     private func recordRecent(_ extraction: ExtractionResult) {
