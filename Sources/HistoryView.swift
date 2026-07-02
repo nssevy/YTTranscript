@@ -44,6 +44,7 @@ struct RecentRow: View {
 /// Fenêtre séparée listant tout l'historique des extractions.
 struct HistoryView: View {
     @State private var entries: [RecentEntry] = RecentStore.load()
+    private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -73,10 +74,11 @@ struct HistoryView: View {
         }
         .padding(20)
         .frame(minWidth: 480, minHeight: 360)
-        // Rafraîchit l'état d'existence à chaque affichage de la fenêtre.
+        // Rafraîchit l'état d'existence au focus et toutes les 5 s.
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification)) { _ in
             entries = RecentStore.load()
         }
+        .onReceive(refreshTimer) { _ in entries = RecentStore.load() }
     }
 }

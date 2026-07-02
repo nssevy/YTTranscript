@@ -24,6 +24,10 @@ struct ContentView: View {
 
     private var target: TargetLanguage { TargetLanguage.named(targetLang) }
 
+    // Re-vérifie l'existence des fichiers des récents toutes les 5 s : recharger
+    // la liste force SwiftUI à réévaluer `entry.exists` (quelques stat(), coût nul).
+    private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Extracteur de sous-titres YouTube")
@@ -98,6 +102,9 @@ struct ContentView: View {
         .padding(20)
         .frame(minWidth: 480)
         .onAppear(perform: prefillFromClipboard)
+        .onReceive(refreshTimer) { _ in refreshRecents() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in refreshRecents() }
         .translationTask(translationConfig) { session in
             await translateAndWriteSRT(session: session)
         }
@@ -295,6 +302,11 @@ struct ContentView: View {
         isTranslating = false
         translationProgress = (0, 0)
         translationNote = "Traduction annulée."
+    }
+
+    /// Recharge les récents pour réévaluer l'existence des fichiers sur disque.
+    private func refreshRecents() {
+        recents = RecentStore.load()
     }
 
     private func recordRecent(_ extraction: ExtractionResult) {
