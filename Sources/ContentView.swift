@@ -21,6 +21,8 @@ struct ContentView: View {
     @State private var duplicateEntry: RecentEntry?
     /// ID YouTube de l'extraction en cours, mémorisé dans l'historique.
     @State private var currentVideoID: String?
+    /// Résultat du déplacement de dossier : (message, succès).
+    @State private var moveNote: (String, Bool)?
     @State private var result: ExtractionResult?
     @State private var recents: [RecentEntry] = RecentStore.load()
     /// IDs des entrées dont le fichier a disparu du disque. C'est CE state qui
@@ -82,6 +84,13 @@ struct ContentView: View {
                     .buttonStyle(.link)
                     .disabled(isWorking || isTranslating)
                     .help("Déplacer le dossier et son contenu vers un nouvel emplacement")
+            }
+
+            if let moveNote {
+                Text(moveNote.0)
+                    .font(.caption)
+                    .foregroundStyle(moveNote.1 ? Color.green : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if isWorking {
@@ -270,6 +279,7 @@ struct ContentView: View {
         errorMessage = nil
         translationNote = nil
         statusNote = nil
+        moveNote = nil
         result = nil
         currentVideoID = youtubeVideoID(from: url)
         let destination = URL(fileURLWithPath: outputDir)
@@ -413,49 +423,64 @@ struct ContentView: View {
         }
     }
 
-    /// Déplace le dossier de sortie (et tout son contenu) vers un nouvel
-    /// emplacement choisi, puis met à jour la config et les chemins de
-    /// l'historique. Le nouveau dossier doit être vide ou inexistant.
+    /// Déplace le dossier de sortie et tout son contenu, puis met à jour la
+    /// config et les chemins de l'historique.
+    /// - Dossier choisi vide → son contenu y est déplacé directement.
+    /// - Dossier choisi non vide → le dossier actuel (ex. "Transcripts") y est
+    ///   déplacé entier, comme dans le Finder.
     private func moveOutputDir() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
-        panel.message = "Choisissez le nouvel emplacement du dossier (créez-en un vide au besoin)."
+        panel.message = "Choisissez où déplacer le dossier des transcripts."
         panel.prompt = "Déplacer ici"
-        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        guard panel.runModal() == .OK, let chosen = panel.url else { return }
 
         let source = URL(fileURLWithPath: outputDir)
         let fm = FileManager.default
 
-        guard destination.path != source.path else { return }
-        guard !destination.path.hasPrefix(source.path + "/") else {
-            statusNote = "Impossible : la destination est à l'intérieur du dossier actuel."
+        guard chosen.path != source.path else {
+            moveNote = ("C'est déjà l'emplacement actuel.", false)
             return
         }
-        // Refuse une destination non vide : évite d'écraser ou de mélanger.
-        let existing = (try? fm.contentsOfDirectory(atPath: destination.path)) ?? []
-        guard existing.filter({ $0 != ".DS_Store" }).isEmpty else {
-            statusNote = "Impossible : le dossier choisi n'est pas vide."
+        guard !chosen.path.hasPrefix(source.path + "/") else {
+            moveNote = ("Impossible : la destination est à l'intérieur du dossier actuel.", false)
             return
         }
 
         do {
-            let items = (try? fm.contentsOfDirectory(atPath: source.path)) ?? []
-            for item in items where item != ".DS_Store" {
-                try fm.moveItem(
-                    at: source.appendingPathComponent(item),
-                    to: destination.appendingPathComponent(item)
-                )
+            let chosenContents = ((try? fm.contentsOfDirectory(atPath: chosen.path)) ?? [])
+                .filter { $0 != ".DS_Store" }
+            let destination: URL
+            if chosenContents.isEmpty {
+                // Dossier vide : il devient le nouveau dossier de sortie.
+                destination = chosen
+                for item in (try fm.contentsOfDirectory(atPath: source.path))
+                    where item != ".DS_Store" {
+                    try fm.moveItem(
+                        at: source.appendingPathComponent(item),
+                        to: destination.appendingPathComponent(item)
+                    )
+                }
+            } else {
+                // Dossier non vide : on y déplace le dossier actuel entier.
+                destination = chosen.appendingPathComponent(source.lastPathComponent)
+                guard !fm.fileExists(atPath: destination.path) else {
+                    moveNote = ("Impossible : « \(destination.lastPathComponent) » existe déjà à cet endroit.", false)
+                    return
+                }
+                try fm.moveItem(at: source, to: destination)
             }
+
             let oldDir = source.path
             outputDir = destination.path
             recents = RecentStore.rebase(from: oldDir, to: destination.path)
             refreshRecents()
             result = nil // ses chemins pointent vers l'ancien emplacement
-            statusNote = "Dossier déplacé vers \(destination.path)."
+            moveNote = ("Dossier déplacé.", true)
         } catch {
-            statusNote = "Échec du déplacement : \(error.localizedDescription)"
+            moveNote = ("Échec du déplacement : \(error.localizedDescription)", false)
         }
     }
 }
