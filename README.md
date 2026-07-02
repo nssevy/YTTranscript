@@ -1,7 +1,7 @@
 # YTTranscript
 
 Application macOS native qui extrait les sous-titres d'une vidéo YouTube et
-produit un transcript `.txt` propre, optimisé pour être lu par une IA — avec,
+produit un transcript `.txt` propre, optimisé pour être lu par une IA avec,
 pour les vidéos en anglais, des sous-titres `.srt` traduits automatiquement.
 
 ## Fonctionnalités
@@ -82,3 +82,5 @@ et des utilitaires (noms de fichiers, IDs YouTube).
 
 YouTube change régulièrement son format. En cas d'échec d'extraction,
 mettre à jour yt-dlp (bouton dans l'app, ou `brew upgrade yt-dlp`).
+
+(Developper avec Claude Fable 5)
