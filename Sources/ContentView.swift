@@ -76,6 +76,12 @@ struct ContentView: View {
                     .font(.caption)
                     .buttonStyle(.link)
                     .disabled(isWorking)
+                    .help("Changer le dossier des prochaines extractions (ne déplace rien)")
+                Button("Déplacer…", action: moveOutputDir)
+                    .font(.caption)
+                    .buttonStyle(.link)
+                    .disabled(isWorking || isTranslating)
+                    .help("Déplacer le dossier et son contenu vers un nouvel emplacement")
             }
 
             if isWorking {
@@ -404,6 +410,52 @@ struct ContentView: View {
         panel.prompt = "Choisir"
         if panel.runModal() == .OK, let url = panel.url {
             outputDir = url.path
+        }
+    }
+
+    /// Déplace le dossier de sortie (et tout son contenu) vers un nouvel
+    /// emplacement choisi, puis met à jour la config et les chemins de
+    /// l'historique. Le nouveau dossier doit être vide ou inexistant.
+    private func moveOutputDir() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.message = "Choisissez le nouvel emplacement du dossier (créez-en un vide au besoin)."
+        panel.prompt = "Déplacer ici"
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+
+        let source = URL(fileURLWithPath: outputDir)
+        let fm = FileManager.default
+
+        guard destination.path != source.path else { return }
+        guard !destination.path.hasPrefix(source.path + "/") else {
+            statusNote = "Impossible : la destination est à l'intérieur du dossier actuel."
+            return
+        }
+        // Refuse une destination non vide : évite d'écraser ou de mélanger.
+        let existing = (try? fm.contentsOfDirectory(atPath: destination.path)) ?? []
+        guard existing.filter({ $0 != ".DS_Store" }).isEmpty else {
+            statusNote = "Impossible : le dossier choisi n'est pas vide."
+            return
+        }
+
+        do {
+            let items = (try? fm.contentsOfDirectory(atPath: source.path)) ?? []
+            for item in items where item != ".DS_Store" {
+                try fm.moveItem(
+                    at: source.appendingPathComponent(item),
+                    to: destination.appendingPathComponent(item)
+                )
+            }
+            let oldDir = source.path
+            outputDir = destination.path
+            recents = RecentStore.rebase(from: oldDir, to: destination.path)
+            refreshRecents()
+            result = nil // ses chemins pointent vers l'ancien emplacement
+            statusNote = "Dossier déplacé vers \(destination.path)."
+        } catch {
+            statusNote = "Échec du déplacement : \(error.localizedDescription)"
         }
     }
 }

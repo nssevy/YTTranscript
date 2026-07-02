@@ -95,4 +95,25 @@ enum RecentStore {
         save(entries)
         return entries
     }
+
+    /// Réécrit les chemins de l'historique après déplacement du dossier de
+    /// sortie : préfixe `oldDir` remplacé par `newDir`.
+    static func rebase(from oldDir: String, to newDir: String) -> [RecentEntry] {
+        func moved(_ path: String) -> String {
+            path.hasPrefix(oldDir + "/")
+                ? newDir + path.dropFirst(oldDir.count)
+                : path
+        }
+        let entries = load().map { entry in
+            RecentEntry(
+                title: entry.title,
+                txtPath: moved(entry.txtPath),
+                srtPath: entry.srtPath.map(moved),
+                date: entry.date,
+                videoID: entry.videoID
+            )
+        }
+        save(entries)
+        return entries
+    }
 }
