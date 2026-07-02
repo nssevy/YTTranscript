@@ -65,26 +65,33 @@ struct Extractor {
         (url.contains("list=") && !url.contains("v=")) || url.contains("/playlist")
     }
 
-    /// Liste les URLs des vidéos d'une playlist (sans télécharger, --flat-playlist).
+    struct PlaylistInfo {
+        let title: String
+        let videoURLs: [String]
+    }
+
+    /// Titre + URLs des vidéos d'une playlist (sans télécharger, --flat-playlist).
     /// Synchrone et bloquant : à appeler hors du main thread.
-    static func playlistVideoURLs(_ url: String, limit: Int = 200) throws -> [String] {
+    static func playlistInfo(_ url: String, limit: Int = 200) throws -> PlaylistInfo {
         guard isYtDlpInstalled else { throw ExtractionError.ytDlpMissing }
         let (status, out, _) = runProcess(ytDlpPath, [
-            "--flat-playlist", "--dump-json", "--playlist-end", String(limit), url,
+            "--flat-playlist", "--dump-single-json", "--playlist-end", String(limit), url,
         ])
-        guard status == 0 else { throw ExtractionError.invalidVideo }
-        // Une ligne JSON par vidéo.
-        let urls: [String] = out.split(separator: "\n").compactMap { line in
-            guard let data = line.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { return nil }
-            if let id = obj["id"] as? String, !id.isEmpty {
+        guard status == 0,
+              let data = out.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = obj["entries"] as? [[String: Any]]
+        else { throw ExtractionError.invalidVideo }
+
+        let urls: [String] = entries.compactMap { entry in
+            if let id = entry["id"] as? String, !id.isEmpty {
                 return "https://www.youtube.com/watch?v=\(id)"
             }
-            return obj["url"] as? String
+            return entry["url"] as? String
         }
         guard !urls.isEmpty else { throw ExtractionError.invalidVideo }
-        return urls
+        return PlaylistInfo(title: obj["title"] as? String ?? "Playlist",
+                            videoURLs: urls)
     }
 
     /// Extrait les sous-titres de la vidéo et écrit le .txt dans `outputDir`.

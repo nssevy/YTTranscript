@@ -24,6 +24,9 @@ struct QueueItem: Identifiable {
     var note: String?
     /// Progression de traduction (blocs faits, total).
     var progress: (done: Int, total: Int)?
+    /// Sous-dossier de sortie (ex. "Playlist - Deep learning") pour grouper
+    /// les vidéos d'une même playlist.
+    var outputSubdir: String?
 
     var displayTitle: String { title ?? url }
 }
@@ -78,17 +81,19 @@ final class AppState: NSObject, ObservableObject {
     // MARK: - File d'extraction
 
     /// Ajoute une ou plusieurs URLs (séparées par espaces/retours à la ligne).
+    /// Tout ce qui ne ressemble pas à une URL YouTube (vidéo ou playlist) est
+    /// IGNORÉ : coller une phrase ne remplit plus la file de déchets.
     /// Les playlists sont dépliées en vidéos individuelles.
     func add(urlsText: String, force: Bool = false) {
         let urls = urlsText
             .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
             .map(String.init)
-            .filter { !$0.isEmpty }
-        for url in urls { enqueue(url, force: force) }
+            .filter { youtubeVideoID(from: $0) != nil || Extractor.isPlaylist($0) }
+        for url in urls { enqueue(url, force: force, subdir: nil) }
         processNextIfIdle()
     }
 
-    private func enqueue(_ url: String, force: Bool) {
+    private func enqueue(_ url: String, force: Bool, subdir: String?) {
         if Extractor.isPlaylist(url) {
             var item = QueueItem(url: url)
             item.status = .expanding
@@ -96,8 +101,8 @@ final class AppState: NSObject, ObservableObject {
             queue.append(item)
             let itemID = item.id
             Task.detached(priority: .userInitiated) {
-                let urls = (try? Extractor.playlistVideoURLs(url)) ?? []
-                await MainActor.run { self.expandPlaylist(itemID, into: urls) }
+                let info = try? Extractor.playlistInfo(url)
+                await MainActor.run { self.expandPlaylist(itemID, with: info) }
             }
             return
         }
@@ -108,20 +113,25 @@ final class AppState: NSObject, ObservableObject {
             var item = QueueItem(url: url)
             item.status = .duplicate
             item.title = existing.title
+            item.outputSubdir = subdir // conservé si « Extraire quand même »
             queue.append(item)
             return
         }
-        queue.append(QueueItem(url: url))
+        var item = QueueItem(url: url)
+        item.outputSubdir = subdir
+        queue.append(item)
     }
 
-    private func expandPlaylist(_ id: UUID, into urls: [String]) {
+    private func expandPlaylist(_ id: UUID, with info: Extractor.PlaylistInfo?) {
         guard let index = queue.firstIndex(where: { $0.id == id }) else { return }
-        if urls.isEmpty {
+        if let info {
+            queue.remove(at: index)
+            // Toutes les vidéos de la playlist dans un dossier commun.
+            let subdir = "Playlist - " + Extractor.sanitizeFilename(info.title)
+            for url in info.videoURLs { enqueue(url, force: false, subdir: subdir) }
+        } else {
             queue[index].status = .failed
             queue[index].errorText = "Playlist introuvable ou vide."
-        } else {
-            queue.remove(at: index)
-            for url in urls { enqueue(url, force: false) }
         }
         processNextIfIdle()
     }
@@ -154,7 +164,9 @@ final class AppState: NSObject, ObservableObject {
         isExtracting = true
         queue[index].status = .extracting
         let item = queue[index]
-        let destination = outputDir
+        // Vidéo de playlist → sous-dossier commun "Playlist - <titre>".
+        let destination = item.outputSubdir.map { outputDir.appendingPathComponent($0) }
+            ?? outputDir
 
         Task.detached(priority: .userInitiated) {
             let outcome: Result<ExtractionResult, Error> = Result {
