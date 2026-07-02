@@ -1,7 +1,35 @@
 import SwiftUI
 import AppKit
 
-/// Ligne compacte (écran principal) : titre barré + rouge si supprimé.
+/// Miniature vidéo (ou repli icône) commune aux lignes récents/historique.
+struct EntryThumbnail: View {
+    let entry: RecentEntry
+    let exists: Bool
+    var width: CGFloat = 64
+
+    var body: some View {
+        if let urlString = entry.thumbnailURL, let url = URL(string: urlString) {
+            AsyncImage(url: url) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Color.secondary.opacity(0.15)
+            }
+            .frame(width: width, height: width * 9 / 16)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .saturation(exists ? 1 : 0)
+        } else {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.secondary.opacity(0.15))
+                .frame(width: width, height: width * 9 / 16)
+                .overlay {
+                    Image(systemName: "doc.text")
+                        .foregroundStyle(exists ? Color.secondary : Color.red)
+                }
+        }
+    }
+}
+
+/// Ligne compacte (écran principal) : miniature + titre barré/rouge si supprimé.
 struct RecentRow: View {
     let entry: RecentEntry
     // Passé par le parent (recalculé à chaque refresh) : sans ce paramètre,
@@ -12,8 +40,7 @@ struct RecentRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "doc.text")
-                .foregroundStyle(exists ? Color.secondary : Color.red)
+            EntryThumbnail(entry: entry, exists: exists, width: 48)
             Text(entry.title)
                 .font(.callout)
                 .strikethrough(!exists)
@@ -97,26 +124,8 @@ struct HistoryRow: View {
         .padding(.vertical, 2)
     }
 
-    @ViewBuilder
     private var thumbnail: some View {
-        if let urlString = entry.thumbnailURL, let url = URL(string: urlString) {
-            AsyncImage(url: url) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Color.secondary.opacity(0.15)
-            }
-            .frame(width: 64, height: 36)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .saturation(exists ? 1 : 0)
-        } else {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color.secondary.opacity(0.15))
-                .frame(width: 64, height: 36)
-                .overlay {
-                    Image(systemName: "doc.text")
-                        .foregroundStyle(exists ? Color.secondary : Color.red)
-                }
-        }
+        EntryThumbnail(entry: entry, exists: exists)
     }
 
     private var metadataLine: String {
