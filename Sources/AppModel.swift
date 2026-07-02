@@ -26,6 +26,8 @@ struct TargetLanguage: Identifiable, Hashable {
 }
 
 /// Une extraction passée, pour la liste des récents.
+/// Les champs optionnels manquent sur les entrées créées par d'anciennes
+/// versions : l'UI doit prévoir un repli.
 struct RecentEntry: Codable, Identifiable, Hashable {
     let title: String
     let txtPath: String
@@ -33,6 +35,10 @@ struct RecentEntry: Codable, Identifiable, Hashable {
     let date: Date
     /// ID YouTube (ex. "dQw4w9WgXcQ"), optionnel pour les entrées historiques.
     var videoID: String?
+    // Métadonnées enrichies (historique v2).
+    var channel: String?
+    var duration: Double?
+    var thumbnailURL: String?
     var id: String { txtPath }
 
     var txtURL: URL { URL(fileURLWithPath: txtPath) }
@@ -115,7 +121,10 @@ enum RecentStore {
                 txtPath: moved(entry.txtPath),
                 srtPath: entry.srtPath.map(moved),
                 date: entry.date,
-                videoID: entry.videoID
+                videoID: entry.videoID,
+                channel: entry.channel,
+                duration: entry.duration,
+                thumbnailURL: entry.thumbnailURL
             )
         }
         save(entries)

@@ -13,6 +13,11 @@ struct SettingsView: View {
     @AppStorage("srtLineWidth") private var srtLineWidth = VTTParser.defaultSRTLineWidth
     @AppStorage("autoExtractOnPaste") private var autoExtractOnPaste = false
     @AppStorage("notifyOnDone") private var notifyOnDone = true
+    @AppStorage("clipboardWatch") private var clipboardWatch = false
+    @AppStorage("menuBarIcon") private var menuBarIcon = true
+    @AppStorage("autoCheckYtDlp") private var autoCheckYtDlp = true
+
+    @ObservedObject private var appState = AppState.shared
 
     @State private var moveNote: (String, Bool)?
     @State private var updateNote: String?
@@ -79,9 +84,27 @@ struct SettingsView: View {
                         .onChange(of: notifyOnDone) { _, enabled in
                             if enabled { Notifier.requestPermission() }
                         }
+                    Toggle("Surveiller le presse-papier (proposer d'extraire les URLs YouTube copiées)",
+                           isOn: $clipboardWatch)
+                        .onChange(of: clipboardWatch) { _, enabled in
+                            if enabled { Notifier.requestPermission() }
+                            appState.setClipboardWatch(enabled: enabled)
+                        }
+                }
+
+                Section("Apparence") {
+                    Toggle("Icône dans la barre de menus", isOn: $menuBarIcon)
                 }
 
                 Section("Maintenance") {
+                    Toggle("Vérifier les mises à jour de yt-dlp au lancement",
+                           isOn: $autoCheckYtDlp)
+                    if appState.ytDlpUpdateAvailable {
+                        Label("Une mise à jour de yt-dlp est disponible.",
+                              systemImage: "arrow.down.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     LabeledContent("yt-dlp") {
                         HStack {
                             Text(ytDlpVersion ?? "version inconnue")
@@ -140,6 +163,7 @@ struct SettingsView: View {
                 isUpdating = false
                 updateNote = message
                 ytDlpVersion = version
+                AppState.shared.ytDlpUpdateAvailable = false
             }
         }
     }

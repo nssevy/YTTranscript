@@ -15,8 +15,13 @@ struct ExtractionResult {
     let segments: [VTTParser.Segment]
     /// Vidéo en anglais → candidate à la traduction française.
     let sourceIsEnglish: Bool
-    /// Sous-titres traduits en français (.srt), écrits après coup par l'UI.
+    /// Sous-titres traduits (.srt), écrits après coup par la file de traduction.
     var srtURL: URL?
+    // Métadonnées pour l'historique enrichi.
+    let title: String
+    let channel: String?
+    let duration: Double
+    let thumbnailURL: String?
 }
 
 struct Extractor {
@@ -53,6 +58,33 @@ struct Extractor {
         }
         let version = ytDlpVersion().map { " (yt-dlp \($0))" } ?? ""
         return "yt-dlp est à jour\(version)."
+    }
+
+    /// URL de playlist « pure » (pas une vidéo ouverte dans une playlist).
+    static func isPlaylist(_ url: String) -> Bool {
+        (url.contains("list=") && !url.contains("v=")) || url.contains("/playlist")
+    }
+
+    /// Liste les URLs des vidéos d'une playlist (sans télécharger, --flat-playlist).
+    /// Synchrone et bloquant : à appeler hors du main thread.
+    static func playlistVideoURLs(_ url: String, limit: Int = 200) throws -> [String] {
+        guard isYtDlpInstalled else { throw ExtractionError.ytDlpMissing }
+        let (status, out, _) = runProcess(ytDlpPath, [
+            "--flat-playlist", "--dump-json", "--playlist-end", String(limit), url,
+        ])
+        guard status == 0 else { throw ExtractionError.invalidVideo }
+        // Une ligne JSON par vidéo.
+        let urls: [String] = out.split(separator: "\n").compactMap { line in
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return nil }
+            if let id = obj["id"] as? String, !id.isEmpty {
+                return "https://www.youtube.com/watch?v=\(id)"
+            }
+            return obj["url"] as? String
+        }
+        guard !urls.isEmpty else { throw ExtractionError.invalidVideo }
+        return urls
     }
 
     /// Extrait les sous-titres de la vidéo et écrit le .txt dans `outputDir`.
@@ -134,7 +166,11 @@ struct Extractor {
             transcriptText: text,
             segments: segments,
             sourceIsEnglish: sourceLang.hasPrefix("en"),
-            srtURL: nil
+            srtURL: nil,
+            title: title,
+            channel: channel,
+            duration: duration,
+            thumbnailURL: info["thumbnail"] as? String
         )
     }
 

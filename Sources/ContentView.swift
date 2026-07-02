@@ -8,40 +8,16 @@ enum Screen {
 }
 
 struct ContentView: View {
-    @AppStorage("outputDir") private var outputDir =
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/Transcripts").path
-    /// Langue cible de la traduction .srt (code, ex. "fr").
-    @AppStorage("targetLang") private var targetLang = "fr"
-    @AppStorage("autoTranslate") private var autoTranslate = true
-    @AppStorage("srtLineWidth") private var srtLineWidth = VTTParser.defaultSRTLineWidth
     @AppStorage("autoExtractOnPaste") private var autoExtractOnPaste = false
     @AppStorage("notifyOnDone") private var notifyOnDone = true
 
+    @ObservedObject private var appState = AppState.shared
+
     @State private var screen: Screen = .main
     @State private var urlText = ""
-    @State private var isWorking = false
-    @State private var isTranslating = false
-    @State private var translationProgress: (done: Int, total: Int) = (0, 0)
-    @State private var errorMessage: String?
-    @State private var translationNote: String?
-    /// Entrée existante détectée pour l'URL demandée → avertissement doublon.
-    @State private var duplicateEntry: RecentEntry?
-    /// ID YouTube de l'extraction en cours, mémorisé dans l'historique.
-    @State private var currentVideoID: String?
-    @State private var result: ExtractionResult?
-    @State private var recents: [RecentEntry] = RecentStore.load()
-    /// IDs des entrées dont le fichier a disparu du disque. C'est CE state qui
-    /// change à la suppression et déclenche le redessin : `entry.exists` lu dans
-    /// le body ne suffit pas, car recharger des récents égaux ne réévalue rien.
-    @State private var missingIDs: Set<String> = []
-    /// Non-nil → déclenche .translationTask (traduction en→cible on-device).
-    @State private var translationConfig: TranslationSession.Configuration?
-
-    private var target: TargetLanguage { TargetLanguage.named(targetLang) }
 
     // Re-vérifie l'existence des fichiers des récents toutes les 5 s : recharger
-    // la liste force SwiftUI à réévaluer `entry.exists` (quelques stat(), coût nul).
+    // la liste force SwiftUI à réévaluer l'existence (quelques stat(), coût nul).
     private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -60,14 +36,14 @@ struct ContentView: View {
         .frame(minWidth: 480)
         .onAppear {
             prefillFromClipboard()
-            refreshRecents()
+            appState.refreshRecents()
             if notifyOnDone { Notifier.requestPermission() }
         }
-        .onReceive(refreshTimer) { _ in refreshRecents() }
+        .onReceive(refreshTimer) { _ in appState.refreshRecents() }
         .onReceive(NotificationCenter.default.publisher(
-            for: NSApplication.didBecomeActiveNotification)) { _ in refreshRecents() }
-        .translationTask(translationConfig) { session in
-            await translateAndWriteSRT(session: session)
+            for: NSApplication.didBecomeActiveNotification)) { _ in appState.refreshRecents() }
+        .translationTask(appState.translationConfig) { session in
+            await appState.runTranslation(session: session)
         }
     }
 
@@ -79,59 +55,21 @@ struct ContentView: View {
                 .font(.headline)
 
             HStack {
-                TextField("URL de la vidéo YouTube", text: $urlText)
+                TextField("URL de vidéo ou de playlist YouTube", text: $urlText)
                     .textFieldStyle(.roundedBorder)
-                    .disabled(isWorking)
-                    .onSubmit(startExtraction)
+                    .onSubmit(submit)
                 Button("Coller", action: pasteFromClipboard)
-                    .disabled(isWorking)
                     .help("Coller le contenu du presse-papier")
-                Button("Extraire", action: startExtraction)
+                Button("Extraire", action: submit)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(isWorking || urlText.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(urlText.trimmingCharacters(in: .whitespaces).isEmpty)
             }
 
-            if isWorking {
-                progressRow("Extraction en cours…")
-            }
-            if isTranslating {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(translationLabel).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Annuler", action: cancelTranslation)
-                        .font(.caption)
-                }
+            if !appState.queue.isEmpty {
+                queueSection
             }
 
-            if let errorMessage {
-                Text(errorMessage)
-                    .foregroundStyle(.red)
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let duplicateEntry {
-                HStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text("Cette vidéo a déjà été extraite.")
-                        .font(.callout)
-                    Spacer()
-                    Button("Ouvrir") {
-                        NSWorkspace.shared.activateFileViewerSelecting(duplicateEntry.finderFiles)
-                    }
-                    Button("Extraire quand même") {
-                        startExtraction(force: true)
-                    }
-                }
-            }
-
-            if let result {
-                resultRow(result)
-            }
-
-            if !recents.isEmpty {
+            if !appState.recents.isEmpty {
                 Divider()
                 recentsSection
             }
@@ -142,47 +80,23 @@ struct ContentView: View {
         .padding(20)
     }
 
-    // MARK: - Sous-vues
+    // MARK: - File d'attente
 
-    private var translationLabel: String {
-        let (done, total) = translationProgress
-        if total > 0 {
-            return "Traduction (\(target.name)) — \(done)/\(total) blocs"
-        }
-        return "Traduction (\(target.name)) en cours…"
-    }
-
-    private func progressRow(_ label: String) -> some View {
-        HStack(spacing: 8) {
-            ProgressView().controlSize(.small)
-            Text(label).foregroundStyle(.secondary)
-        }
-    }
-
-    private func resultRow(_ result: ExtractionResult) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(result.fileURL.lastPathComponent)
-                    .lineLimit(1).truncationMode(.middle)
-                if let srtURL = result.srtURL {
-                    Text(srtURL.lastPathComponent)
-                        .font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
-                } else if let translationNote {
-                    Text(translationNote)
-                        .font(.caption).foregroundStyle(.orange)
+    private var queueSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("File d'attente").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if appState.queue.contains(where: {
+                    [.done, .failed, .duplicate].contains($0.status)
+                }) {
+                    Button("Effacer terminés", action: appState.clearFinished)
+                        .font(.caption)
+                        .buttonStyle(.link)
                 }
             }
-            Spacer()
-            Button("Reveal in Finder") {
-                let files = [result.fileURL] + (result.srtURL.map { [$0] } ?? [])
-                NSWorkspace.shared.activateFileViewerSelecting(files)
-            }
-            Button("Copier") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(result.transcriptText, forType: .string)
+            ForEach(appState.queue) { item in
+                QueueRow(item: item)
             }
         }
     }
@@ -190,11 +104,12 @@ struct ContentView: View {
     private var recentsSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Récents").font(.caption).foregroundStyle(.secondary)
-            ForEach(recents.prefix(5)) { entry in
-                RecentRow(entry: entry, exists: !missingIDs.contains(entry.id))
+            ForEach(appState.recents.prefix(5)) { entry in
+                RecentRow(entry: entry,
+                          exists: !appState.missingIDs.contains(entry.id))
             }
-            if recents.count > 5 {
-                Button("Voir tout l'historique (\(recents.count))") {
+            if appState.recents.count > 5 {
+                Button("Voir tout l'historique (\(appState.recents.count))") {
                     screen = .history
                 }
                 .font(.caption)
@@ -215,6 +130,12 @@ struct ContentView: View {
                 screen = .settings
             } label: {
                 Label("Paramètres", systemImage: "gearshape")
+                    .overlay(alignment: .topTrailing) {
+                        if appState.ytDlpUpdateAvailable {
+                            Circle().fill(.red).frame(width: 6, height: 6)
+                                .offset(x: 6, y: -4)
+                        }
+                    }
             }
             .font(.caption)
             Spacer()
@@ -223,6 +144,13 @@ struct ContentView: View {
 
     // MARK: - Logique
 
+    private func submit() {
+        let text = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        appState.add(urlsText: text)
+        urlText = ""
+    }
+
     /// Remplace le champ URL par le contenu du presse-papier (bouton Coller).
     /// Si l'extraction auto est activée et que c'est une URL YouTube, lance direct.
     private func pasteFromClipboard() {
@@ -230,8 +158,8 @@ struct ContentView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines), !clip.isEmpty
         else { return }
         urlText = clip
-        if autoExtractOnPaste, youtubeVideoID(from: clip) != nil {
-            startExtraction()
+        if autoExtractOnPaste, youtubeVideoID(from: clip) != nil || Extractor.isPlaylist(clip) {
+            submit()
         }
     }
 
@@ -244,154 +172,114 @@ struct ContentView: View {
         else { return }
         urlText = clip
     }
+}
 
-    private func startExtraction() {
-        startExtraction(force: false)
-    }
+// MARK: - Ligne de la file d'attente
 
-    private func startExtraction(force: Bool) {
-        let url = urlText.trimmingCharacters(in: .whitespaces)
-        guard !url.isEmpty, !isWorking else { return }
+struct QueueRow: View {
+    let item: QueueItem
+    @ObservedObject private var appState = AppState.shared
 
-        // Doublon : même ID vidéo déjà extrait et fichiers toujours sur disque.
-        duplicateEntry = nil
-        if !force, let videoID = youtubeVideoID(from: url),
-           let existing = recents.first(where: { $0.videoID == videoID && $0.exists }) {
-            duplicateEntry = existing
-            return
-        }
+    var body: some View {
+        HStack(spacing: 8) {
+            statusIcon
 
-        isWorking = true
-        errorMessage = nil
-        translationNote = nil
-        result = nil
-        currentVideoID = youtubeVideoID(from: url)
-        let destination = URL(fileURLWithPath: outputDir)
-
-        Task.detached(priority: .userInitiated) {
-            let outcome: Result<ExtractionResult, Error> = Result {
-                try Extractor.extract(videoURL: url, outputDir: destination)
-            }
-            await MainActor.run {
-                isWorking = false
-                switch outcome {
-                case .success(let extraction):
-                    result = extraction
-                    recordRecent(extraction)
-                    notify(title: "Transcript prêt",
-                           body: extraction.fileURL.lastPathComponent)
-                    // Traduction on-device si activée, vidéo anglaise, cible ≠ anglais.
-                    if autoTranslate, extraction.sourceIsEnglish, targetLang != "en",
-                       !extraction.segments.isEmpty {
-                        isTranslating = true
-                        startTranslationTask()
-                    }
-                case .failure(ExtractionError.ytDlpMissing):
-                    errorMessage = "yt-dlp est introuvable. Installez-le avec : brew install yt-dlp ffmpeg"
-                case .failure:
-                    errorMessage = "Cette vidéo est invalide ou ne correspond pas aux critères requis."
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.displayTitle)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(subtitleColor)
+                        .lineLimit(2)
                 }
             }
+
+            Spacer()
+            actions
         }
+        .padding(.vertical, 2)
     }
 
-    /// (Re)déclenche la tâche liée à .translationTask. Piège SwiftUI : la tâche
-    /// ne repart que si la configuration CHANGE. Recréer une config identique
-    /// (mêmes langues) est ignoré — la 2e vidéo ne se traduisait jamais.
-    /// Même paire de langues → config.invalidate() ; sinon nouvelle config.
-    private func startTranslationTask() {
-        let targetLanguage = Locale.Language(identifier: targetLang)
-        if translationConfig != nil, translationConfig?.target == targetLanguage {
-            translationConfig?.invalidate()
-        } else {
-            translationConfig = TranslationSession.Configuration(
-                source: Locale.Language(identifier: "en"),
-                target: targetLanguage
-            )
-        }
-    }
-
-    /// Traduit les segments dans la langue cible (framework Translation,
-    /// on-device) et écrit le .srt à côté du .txt. Échec non bloquant.
-    /// Traité par lots pour afficher la progression et permettre l'annulation.
-    private func translateAndWriteSRT(session: TranslationSession) async {
-        // NB : ne PAS remettre translationConfig à nil ici — elle reste en place
-        // et sera invalidée (config.invalidate()) pour la traduction suivante.
-        defer {
-            isTranslating = false
-            translationProgress = (0, 0)
-        }
-        // La tâche se déclenche aussi au premier rendu si une config existe
-        // déjà : sans extraction en attente, ne rien faire.
-        guard isTranslating, let extraction = result else { return }
-
-        do {
-            try await session.prepareTranslation()
-
-            // Regroupe en blocs lisibles avant de traduire (évite les cues
-            // « flash » de 10 ms des auto-subs YouTube).
-            let blocks = VTTParser.groupForSRT(extraction.segments, lineWidth: srtLineWidth)
-            translationProgress = (0, blocks.count)
-
-            var translated: [String] = []
-            translated.reserveCapacity(blocks.count)
-            let batchSize = 40
-            var index = 0
-            while index < blocks.count {
-                if Task.isCancelled {
-                    translationNote = "Traduction annulée."
-                    return
-                }
-                let slice = Array(blocks[index..<min(index + batchSize, blocks.count)])
-                let requests = slice.map { TranslationSession.Request(sourceText: $0.text) }
-                let responses = try await session.translations(from: requests)
-                translated.append(contentsOf: responses.map(\.targetText))
-                index += slice.count
-                translationProgress = (translated.count, blocks.count)
+    private var subtitle: String? {
+        switch item.status {
+        case .pending: return "En attente"
+        case .expanding: return "Lecture de la playlist…"
+        case .extracting: return "Extraction en cours…"
+        case .translating:
+            if let progress = item.progress, progress.total > 0 {
+                return "Traduction — \(progress.done)/\(progress.total) blocs"
             }
-
-            let srt = VTTParser.renderSRT(segments: blocks, translatedTexts: translated,
-                                          lineWidth: srtLineWidth)
-            let srtURL = extraction.fileURL.deletingPathExtension()
-                .appendingPathExtension("\(targetLang).srt")
-            try srt.write(to: srtURL, atomically: true, encoding: .utf8)
-            result?.srtURL = srtURL
-            if let updated = result { recordRecent(updated) }
-            notify(title: "Traduction terminée", body: srtURL.lastPathComponent)
-        } catch is CancellationError {
-            translationNote = "Traduction annulée."
-        } catch {
-            translationNote = "Traduction indisponible (\(error.localizedDescription))"
+            return "Traduction en cours…"
+        case .done: return item.note ?? item.result?.srtURL?.lastPathComponent
+        case .failed: return item.errorText
+        case .duplicate: return "Cette vidéo a déjà été extraite."
         }
     }
 
-    private func cancelTranslation() {
-        // Annule la tâche liée à .translationTask et remet l'UI à zéro.
-        translationConfig = nil
-        isTranslating = false
-        translationProgress = (0, 0)
-        translationNote = "Traduction annulée."
+    private var subtitleColor: Color {
+        switch item.status {
+        case .failed: return .red
+        case .duplicate: return .orange
+        case .done: return item.note == nil ? .secondary : .orange
+        default: return .secondary
+        }
     }
 
-    private func notify(title: String, body: String) {
-        guard notifyOnDone else { return }
-        Notifier.send(title: title, body: body)
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch item.status {
+        case .pending, .expanding:
+            Image(systemName: "clock").foregroundStyle(.secondary)
+        case .extracting, .translating:
+            ProgressView().controlSize(.small)
+        case .done:
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .failed:
+            Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+        case .duplicate:
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        }
     }
 
-    /// Recharge les récents et recalcule quels fichiers manquent sur le disque.
-    private func refreshRecents() {
-        recents = RecentStore.load()
-        missingIDs = Set(recents.filter { !$0.exists }.map(\.id))
-    }
-
-    private func recordRecent(_ extraction: ExtractionResult) {
-        let entry = RecentEntry(
-            title: extraction.fileURL.deletingPathExtension().lastPathComponent,
-            txtPath: extraction.fileURL.path,
-            srtPath: extraction.srtURL?.path,
-            date: Date(),
-            videoID: currentVideoID
-        )
-        recents = RecentStore.add(entry)
+    @ViewBuilder
+    private var actions: some View {
+        switch item.status {
+        case .done:
+            if let result = item.result {
+                Button("Ouvrir") {
+                    let files = [result.fileURL] + (result.srtURL.map { [$0] } ?? [])
+                    NSWorkspace.shared.activateFileViewerSelecting(files)
+                }
+                .font(.caption)
+                Button("Copier") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(result.transcriptText, forType: .string)
+                }
+                .font(.caption)
+            }
+        case .translating:
+            Button("Annuler") { appState.cancelTranslation(item.id) }
+                .font(.caption)
+        case .duplicate, .failed:
+            Button("Extraire quand même") { appState.forceExtract(item.id) }
+                .font(.caption)
+            Button {
+                appState.removeItem(item.id)
+            } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .buttonStyle(.borderless)
+        case .pending:
+            Button {
+                appState.removeItem(item.id)
+            } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .buttonStyle(.borderless)
+        default:
+            EmptyView()
+        }
     }
 }
