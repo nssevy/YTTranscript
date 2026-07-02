@@ -55,6 +55,7 @@ struct HistoryView: View {
     /// Voir ContentView.missingIDs : ce state change à la suppression d'un
     /// fichier et force le redessin (des entrées égales ne suffisent pas).
     @State private var missingIDs: Set<String> = []
+    @State private var confirmClear = false
     private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     private func refresh() {
@@ -89,10 +90,30 @@ struct HistoryView: View {
                     }
                 }
                 .listStyle(.inset)
+
+                HStack {
+                    Spacer()
+                    Button("Vider tout l'historique", role: .destructive) {
+                        confirmClear = true
+                    }
+                    .font(.caption)
+                }
             }
         }
         .padding(20)
         .frame(minWidth: 480, minHeight: 360)
+        .confirmationDialog(
+            "Vider tout l'historique ?",
+            isPresented: $confirmClear
+        ) {
+            Button("Vider", role: .destructive) {
+                RecentStore.clear()
+                refresh()
+            }
+            Button("Annuler", role: .cancel) {}
+        } message: {
+            Text("Les fichiers sur le disque ne seront pas supprimés.")
+        }
         // Rafraîchit l'état d'existence à l'ouverture, au focus et toutes les 5 s.
         .onAppear(perform: refresh)
         .onReceive(NotificationCenter.default.publisher(

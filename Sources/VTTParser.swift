@@ -163,15 +163,16 @@ enum VTTParser {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    /// Longueur cible d'un sous-titre : 2 lignes de ~42 caractères (norme lisible).
-    private static let srtMaxChars = 84
-    private static let srtLineWidth = 42
+    /// Largeur de ligne .srt par défaut : 2 lignes de ~42 caractères (norme lisible).
+    static let defaultSRTLineWidth = 42
 
     /// Regroupe les segments bruts en blocs courts, lisibles à l'écran.
     /// Les auto-subs YouTube produisent des cues qui se chevauchent et durent
-    /// parfois 10 ms (« flash »). On fusionne jusqu'à ~84 caractères / une fin
-    /// de phrase, borne dure à 6 s, pour ne jamais déborder l'écran.
-    static func groupForSRT(_ segments: [Segment]) -> [Segment] {
+    /// parfois 10 ms (« flash »). On fusionne jusqu'à 2 lignes de `lineWidth`
+    /// caractères / une fin de phrase, borne dure à 6 s.
+    static func groupForSRT(_ segments: [Segment],
+                            lineWidth: Int = defaultSRTLineWidth) -> [Segment] {
+        let srtMaxChars = lineWidth * 2
         var groups: [Segment] = []
         for segment in segments {
             if var last = groups.last {
@@ -199,7 +200,8 @@ enum VTTParser {
 
     /// Fichier .srt à partir des blocs regroupés et de leurs textes traduits
     /// (même ordre, même nombre). Timestamps d'origine conservés.
-    static func renderSRT(segments: [Segment], translatedTexts: [String]) -> String {
+    static func renderSRT(segments: [Segment], translatedTexts: [String],
+                          lineWidth: Int = defaultSRTLineWidth) -> String {
         var blocks: [String] = []
         for (index, segment) in segments.enumerated() {
             let text = index < translatedTexts.count ? translatedTexts[index] : segment.text
@@ -208,22 +210,21 @@ enum VTTParser {
             blocks.append("""
             \(index + 1)
             \(formatSRTTimestamp(segment.start)) --> \(formatSRTTimestamp(end))
-            \(wrapLines(text))
+            \(wrapLines(text, width: lineWidth))
             """)
         }
         return blocks.joined(separator: "\n\n") + "\n"
     }
 
-    /// Replie un texte sur au plus 2 lignes d'environ 42 caractères,
-    /// sans jamais couper un mot.
-    private static func wrapLines(_ text: String) -> String {
+    /// Replie un texte en lignes de `width` caractères max, sans couper un mot.
+    private static func wrapLines(_ text: String, width: Int) -> String {
         let words = text.split(separator: " ")
         var lines: [String] = []
         var current = ""
         for word in words {
             if current.isEmpty {
                 current = String(word)
-            } else if current.count + 1 + word.count <= srtLineWidth {
+            } else if current.count + 1 + word.count <= width {
                 current += " " + word
             } else {
                 lines.append(current)

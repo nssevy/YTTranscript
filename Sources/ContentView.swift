@@ -2,28 +2,33 @@ import SwiftUI
 import AppKit
 import Translation
 
+/// Écrans affichés dans la fenêtre unique de l'app.
+enum Screen {
+    case main, history, settings
+}
+
 struct ContentView: View {
     @AppStorage("outputDir") private var outputDir =
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Documents/Transcripts").path
     /// Langue cible de la traduction .srt (code, ex. "fr").
     @AppStorage("targetLang") private var targetLang = "fr"
+    @AppStorage("autoTranslate") private var autoTranslate = true
+    @AppStorage("srtLineWidth") private var srtLineWidth = VTTParser.defaultSRTLineWidth
+    @AppStorage("autoExtractOnPaste") private var autoExtractOnPaste = false
+    @AppStorage("notifyOnDone") private var notifyOnDone = true
 
-    /// true → l'écran historique remplace l'écran principal (même fenêtre).
-    @State private var showHistory = false
+    @State private var screen: Screen = .main
     @State private var urlText = ""
     @State private var isWorking = false
     @State private var isTranslating = false
     @State private var translationProgress: (done: Int, total: Int) = (0, 0)
     @State private var errorMessage: String?
     @State private var translationNote: String?
-    @State private var statusNote: String?
     /// Entrée existante détectée pour l'URL demandée → avertissement doublon.
     @State private var duplicateEntry: RecentEntry?
     /// ID YouTube de l'extraction en cours, mémorisé dans l'historique.
     @State private var currentVideoID: String?
-    /// Résultat du déplacement de dossier : (message, succès).
-    @State private var moveNote: (String, Bool)?
     @State private var result: ExtractionResult?
     @State private var recents: [RecentEntry] = RecentStore.load()
     /// IDs des entrées dont le fichier a disparu du disque. C'est CE state qui
@@ -41,18 +46,22 @@ struct ContentView: View {
 
     var body: some View {
         // Les modificateurs (timer, translationTask…) restent sur le Group :
-        // la traduction continue même quand l'écran historique est affiché.
+        // la traduction continue même sur les écrans historique/paramètres.
         Group {
-            if showHistory {
-                HistoryView(onBack: { showHistory = false })
-            } else {
+            switch screen {
+            case .main:
                 mainScreen
+            case .history:
+                HistoryView(onBack: { screen = .main })
+            case .settings:
+                SettingsView(onBack: { screen = .main })
             }
         }
         .frame(minWidth: 480)
         .onAppear {
             prefillFromClipboard()
             refreshRecents()
+            if notifyOnDone { Notifier.requestPermission() }
         }
         .onReceive(refreshTimer) { _ in refreshRecents() }
         .onReceive(NotificationCenter.default.publisher(
@@ -61,6 +70,8 @@ struct ContentView: View {
             await translateAndWriteSRT(session: session)
         }
     }
+
+    // MARK: - Écran principal
 
     private var mainScreen: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -78,43 +89,6 @@ struct ContentView: View {
                 Button("Extraire", action: startExtraction)
                     .keyboardShortcut(.defaultAction)
                     .disabled(isWorking || urlText.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-
-            HStack(spacing: 12) {
-                Picker("Traduction :", selection: $targetLang) {
-                    ForEach(TargetLanguage.all) { lang in
-                        Text(lang.name).tag(lang.code)
-                    }
-                }
-                .fixedSize()
-                .disabled(isWorking)
-                Spacer()
-            }
-            .font(.caption)
-
-            HStack(spacing: 6) {
-                Text("Dossier : \(abbreviatedOutputDir)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Button("Modifier…", action: chooseOutputDir)
-                    .font(.caption)
-                    .buttonStyle(.link)
-                    .disabled(isWorking)
-                    .help("Changer le dossier des prochaines extractions (ne déplace rien)")
-                Button("Déplacer…", action: moveOutputDir)
-                    .font(.caption)
-                    .buttonStyle(.link)
-                    .disabled(isWorking || isTranslating)
-                    .help("Déplacer le dossier et son contenu vers un nouvel emplacement")
-            }
-
-            if let moveNote {
-                Text(moveNote.0)
-                    .font(.caption)
-                    .foregroundStyle(moveNote.1 ? Color.green : Color.orange)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if isWorking {
@@ -221,7 +195,7 @@ struct ContentView: View {
             }
             if recents.count > 5 {
                 Button("Voir tout l'historique (\(recents.count))") {
-                    showHistory = true
+                    screen = .history
                 }
                 .font(.caption)
                 .buttonStyle(.link)
@@ -232,40 +206,33 @@ struct ContentView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             Button {
-                showHistory = true
+                screen = .history
             } label: {
                 Label("Historique", systemImage: "clock.arrow.circlepath")
             }
             .font(.caption)
-            Button("Mettre à jour yt-dlp", action: updateYtDlp)
-                .font(.caption)
-                .disabled(isWorking)
-            if let statusNote {
-                Text(statusNote)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+            Button {
+                screen = .settings
+            } label: {
+                Label("Paramètres", systemImage: "gearshape")
             }
+            .font(.caption)
             Spacer()
         }
     }
 
     // MARK: - Logique
 
-    private var abbreviatedOutputDir: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return outputDir.hasPrefix(home)
-            ? "~" + outputDir.dropFirst(home.count)
-            : outputDir
-    }
-
     /// Remplace le champ URL par le contenu du presse-papier (bouton Coller).
+    /// Si l'extraction auto est activée et que c'est une URL YouTube, lance direct.
     private func pasteFromClipboard() {
         guard let clip = NSPasteboard.general.string(forType: .string)?
             .trimmingCharacters(in: .whitespacesAndNewlines), !clip.isEmpty
         else { return }
         urlText = clip
+        if autoExtractOnPaste, youtubeVideoID(from: clip) != nil {
+            startExtraction()
+        }
     }
 
     /// Pré-remplit le champ avec l'URL du presse-papier si c'est un lien YouTube.
@@ -297,8 +264,6 @@ struct ContentView: View {
         isWorking = true
         errorMessage = nil
         translationNote = nil
-        statusNote = nil
-        moveNote = nil
         result = nil
         currentVideoID = youtubeVideoID(from: url)
         let destination = URL(fileURLWithPath: outputDir)
@@ -313,8 +278,10 @@ struct ContentView: View {
                 case .success(let extraction):
                     result = extraction
                     recordRecent(extraction)
-                    // Traduction on-device si vidéo anglaise et cible ≠ anglais.
-                    if extraction.sourceIsEnglish, targetLang != "en",
+                    notify(title: "Transcript prêt",
+                           body: extraction.fileURL.lastPathComponent)
+                    // Traduction on-device si activée, vidéo anglaise, cible ≠ anglais.
+                    if autoTranslate, extraction.sourceIsEnglish, targetLang != "en",
                        !extraction.segments.isEmpty {
                         isTranslating = true
                         startTranslationTask()
@@ -346,8 +313,7 @@ struct ContentView: View {
 
     /// Traduit les segments dans la langue cible (framework Translation,
     /// on-device) et écrit le .srt à côté du .txt. Échec non bloquant.
-    /// Traité par lots pour afficher la progression et permettre l'annulation
-    /// (bouton Annuler → translationConfig = nil → la tâche est annulée).
+    /// Traité par lots pour afficher la progression et permettre l'annulation.
     private func translateAndWriteSRT(session: TranslationSession) async {
         // NB : ne PAS remettre translationConfig à nil ici — elle reste en place
         // et sera invalidée (config.invalidate()) pour la traduction suivante.
@@ -364,7 +330,7 @@ struct ContentView: View {
 
             // Regroupe en blocs lisibles avant de traduire (évite les cues
             // « flash » de 10 ms des auto-subs YouTube).
-            let blocks = VTTParser.groupForSRT(extraction.segments)
+            let blocks = VTTParser.groupForSRT(extraction.segments, lineWidth: srtLineWidth)
             translationProgress = (0, blocks.count)
 
             var translated: [String] = []
@@ -384,12 +350,14 @@ struct ContentView: View {
                 translationProgress = (translated.count, blocks.count)
             }
 
-            let srt = VTTParser.renderSRT(segments: blocks, translatedTexts: translated)
+            let srt = VTTParser.renderSRT(segments: blocks, translatedTexts: translated,
+                                          lineWidth: srtLineWidth)
             let srtURL = extraction.fileURL.deletingPathExtension()
                 .appendingPathExtension("\(targetLang).srt")
             try srt.write(to: srtURL, atomically: true, encoding: .utf8)
             result?.srtURL = srtURL
             if let updated = result { recordRecent(updated) }
+            notify(title: "Traduction terminée", body: srtURL.lastPathComponent)
         } catch is CancellationError {
             translationNote = "Traduction annulée."
         } catch {
@@ -403,6 +371,11 @@ struct ContentView: View {
         isTranslating = false
         translationProgress = (0, 0)
         translationNote = "Traduction annulée."
+    }
+
+    private func notify(title: String, body: String) {
+        guard notifyOnDone else { return }
+        Notifier.send(title: title, body: body)
     }
 
     /// Recharge les récents et recalcule quels fichiers manquent sur le disque.
@@ -420,86 +393,5 @@ struct ContentView: View {
             videoID: currentVideoID
         )
         recents = RecentStore.add(entry)
-    }
-
-    private func updateYtDlp() {
-        statusNote = "Mise à jour de yt-dlp…"
-        Task.detached(priority: .userInitiated) {
-            let message = Extractor.updateYtDlp()
-            await MainActor.run { statusNote = message }
-        }
-    }
-
-    private func chooseOutputDir() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.directoryURL = URL(fileURLWithPath: outputDir)
-        panel.prompt = "Choisir"
-        if panel.runModal() == .OK, let url = panel.url {
-            outputDir = url.path
-        }
-    }
-
-    /// Déplace le dossier de sortie et tout son contenu, puis met à jour la
-    /// config et les chemins de l'historique.
-    /// - Dossier choisi vide → son contenu y est déplacé directement.
-    /// - Dossier choisi non vide → le dossier actuel (ex. "Transcripts") y est
-    ///   déplacé entier, comme dans le Finder.
-    private func moveOutputDir() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.message = "Choisissez où déplacer le dossier des transcripts."
-        panel.prompt = "Déplacer ici"
-        guard panel.runModal() == .OK, let chosen = panel.url else { return }
-
-        let source = URL(fileURLWithPath: outputDir)
-        let fm = FileManager.default
-
-        guard chosen.path != source.path else {
-            moveNote = ("C'est déjà l'emplacement actuel.", false)
-            return
-        }
-        guard !chosen.path.hasPrefix(source.path + "/") else {
-            moveNote = ("Impossible : la destination est à l'intérieur du dossier actuel.", false)
-            return
-        }
-
-        do {
-            let chosenContents = ((try? fm.contentsOfDirectory(atPath: chosen.path)) ?? [])
-                .filter { $0 != ".DS_Store" }
-            let destination: URL
-            if chosenContents.isEmpty {
-                // Dossier vide : il devient le nouveau dossier de sortie.
-                destination = chosen
-                for item in (try fm.contentsOfDirectory(atPath: source.path))
-                    where item != ".DS_Store" {
-                    try fm.moveItem(
-                        at: source.appendingPathComponent(item),
-                        to: destination.appendingPathComponent(item)
-                    )
-                }
-            } else {
-                // Dossier non vide : on y déplace le dossier actuel entier.
-                destination = chosen.appendingPathComponent(source.lastPathComponent)
-                guard !fm.fileExists(atPath: destination.path) else {
-                    moveNote = ("Impossible : « \(destination.lastPathComponent) » existe déjà à cet endroit.", false)
-                    return
-                }
-                try fm.moveItem(at: source, to: destination)
-            }
-
-            let oldDir = source.path
-            outputDir = destination.path
-            recents = RecentStore.rebase(from: oldDir, to: destination.path)
-            refreshRecents()
-            result = nil // ses chemins pointent vers l'ancien emplacement
-            moveNote = ("Dossier déplacé.", true)
-        } catch {
-            moveNote = ("Échec du déplacement : \(error.localizedDescription)", false)
-        }
     }
 }

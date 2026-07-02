@@ -96,6 +96,11 @@ enum RecentStore {
         return entries
     }
 
+    /// Vide tout l'historique (ne touche pas aux fichiers du disque).
+    static func clear() {
+        save([])
+    }
+
     /// Réécrit les chemins de l'historique après déplacement du dossier de
     /// sortie : préfixe `oldDir` remplacé par `newDir`.
     static func rebase(from oldDir: String, to newDir: String) -> [RecentEntry] {
