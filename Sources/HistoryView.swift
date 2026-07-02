@@ -164,8 +164,10 @@ struct HistoryView: View {
 
     private let refreshTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
-    private func refresh() {
-        entries = RecentStore.load()
+    /// `reload` : redécode le JSON (ouverture, suppression). Sinon simple
+    /// re-vérification d'existence des fichiers (pas de décodage toutes les 5 s).
+    private func refresh(reload: Bool = false) {
+        if reload { entries = RecentStore.load() }
         missingIDs = Set(entries.filter { !$0.exists }.map(\.id))
     }
 
@@ -236,6 +238,7 @@ struct HistoryView: View {
                             snippet: contentMatches[entry.id]
                         ) {
                             entries = RecentStore.remove(entry.id)
+                            AppState.shared.refreshRecents(reload: true)
                         }
                     }
                 }
@@ -256,10 +259,13 @@ struct HistoryView: View {
         .padding(20)
         .frame(minWidth: 480, minHeight: 400)
         // Rafraîchit l'état d'existence à l'ouverture, au focus et toutes les 5 s.
-        .onAppear(perform: refresh)
+        .onAppear { refresh(reload: true) }
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
-        .onReceive(refreshTimer) { _ in refresh() }
+        .onReceive(refreshTimer) { _ in
+            guard NSApp.isActive else { return }
+            refresh()
+        }
         .onChange(of: query) { _, newQuery in
             scheduleContentSearch(newQuery)
         }
@@ -269,7 +275,8 @@ struct HistoryView: View {
         ) {
             Button("Vider", role: .destructive) {
                 RecentStore.clear()
-                refresh()
+                refresh(reload: true)
+                AppState.shared.refreshRecents(reload: true)
             }
             Button("Annuler", role: .cancel) {}
         } message: {

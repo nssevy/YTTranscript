@@ -194,6 +194,7 @@ final class AppState: NSObject, ObservableObject {
                 pumpTranslations()
             } else {
                 queue[index].status = .done
+                queue[index].result?.segments = [] // plus besoin, libère la mémoire
             }
         case .failure(ExtractionError.ytDlpMissing):
             queue[index].status = .failed
@@ -249,7 +250,8 @@ final class AppState: NSObject, ObservableObject {
 
             var translated: [String] = []
             translated.reserveCapacity(blocks.count)
-            let batchSize = 40
+            // Gros lots = moins d'allers-retours avec le moteur de traduction.
+            let batchSize = 150
             var cursor = 0
             while cursor < blocks.count {
                 if Task.isCancelled {
@@ -306,12 +308,18 @@ final class AppState: NSObject, ObservableObject {
         queue[index].status = .done
         queue[index].note = note
         queue[index].progress = nil
+        queue[index].result?.segments = [] // plus besoin, libère la mémoire
     }
 
     // MARK: - Historique
 
-    func refreshRecents() {
-        recents = RecentStore.load()
+    /// `reload` : redécode le JSON de l'historique (après une modification
+    /// externe). Sinon, simple re-vérification d'existence des fichiers
+    /// (quelques stat(), pas de décodage toutes les 5 s).
+    func refreshRecents(reload: Bool = false) {
+        if reload || recents.isEmpty {
+            recents = RecentStore.load()
+        }
         missingIDs = Set(recents.filter { !$0.exists }.map(\.id))
     }
 
@@ -340,6 +348,8 @@ final class AppState: NSObject, ObservableObject {
         let timer = Timer(timeInterval: 1.0, repeats: true) { _ in
             Task { @MainActor in AppState.shared.checkClipboard() }
         }
+        // Laisse macOS regrouper les réveils (économie d'énergie).
+        timer.tolerance = 0.5
         RunLoop.main.add(timer, forMode: .common)
         clipboardTimer = timer
     }

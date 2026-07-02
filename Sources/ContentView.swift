@@ -36,10 +36,15 @@ struct ContentView: View {
         .frame(minWidth: 480)
         .onAppear {
             prefillFromClipboard()
-            appState.refreshRecents()
+            appState.refreshRecents(reload: true)
             if notifyOnDone { Notifier.requestPermission() }
         }
-        .onReceive(refreshTimer) { _ in appState.refreshRecents() }
+        .onReceive(refreshTimer) { _ in
+            // Rien à re-vérifier si l'app est en arrière-plan ou si les
+            // récents ne sont pas visibles (économie de réveils CPU).
+            guard NSApp.isActive, screen == .main else { return }
+            appState.refreshRecents()
+        }
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification)) { _ in appState.refreshRecents() }
         .translationTask(appState.translationConfig) { session in
