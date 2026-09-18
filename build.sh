@@ -41,6 +41,7 @@ swiftc -O -parse-as-library \
   -o "$APP/Contents/MacOS/YTTranscript"
 
 cp Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # Signature ad hoc : suffisante pour un usage local, aucune notarisation.
