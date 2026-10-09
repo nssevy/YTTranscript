@@ -6,7 +6,7 @@ import YTTranscriptCore
 
 /// Un élément de la file d'extraction.
 struct QueueItem: Identifiable {
-    enum Status {
+    enum Status: Equatable {
         case pending        // en attente d'extraction
         case expanding      // playlist en cours d'énumération
         case duplicate      // déjà extrait, en attente de décision

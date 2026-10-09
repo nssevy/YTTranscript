@@ -56,7 +56,7 @@ struct ContentView: View {
     // MARK: - Écran principal
 
     private var mainScreen: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             Text("Extracteur de sous-titres YouTube")
                 .font(.headline)
 
@@ -103,8 +103,13 @@ struct ContentView: View {
             }
             ForEach(appState.queue) { item in
                 QueueRow(item: item)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .top)),
+                        removal: .opacity
+                    ))
             }
         }
+        .animation(.default, value: appState.queue.map(\.id))
     }
 
     private var recentsSection: some View {
@@ -125,7 +130,7 @@ struct ContentView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Theme.Spacing.md) {
             Button {
                 screen = .history
             } label: {
@@ -187,7 +192,7 @@ struct QueueRow: View {
     @ObservedObject private var appState = AppState.shared
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Theme.Spacing.sm) {
             statusIcon
 
             VStack(alignment: .leading, spacing: 2) {
@@ -205,7 +210,17 @@ struct QueueRow: View {
             Spacer()
             actions
         }
-        .padding(.vertical, 2)
+        .cardBackground(tint: cardTint)
+        .animation(.default, value: item.status)
+    }
+
+    private var cardTint: Color? {
+        switch item.status {
+        case .failed: return Theme.failure
+        case .duplicate: return Theme.warning
+        case .done: return Theme.success
+        default: return nil
+        }
     }
 
     private var subtitle: String? {
@@ -226,9 +241,9 @@ struct QueueRow: View {
 
     private var subtitleColor: Color {
         switch item.status {
-        case .failed: return .red
-        case .duplicate: return .orange
-        case .done: return item.note == nil ? .secondary : .orange
+        case .failed: return Theme.failure
+        case .duplicate: return Theme.warning
+        case .done: return item.note == nil ? .secondary : Theme.warning
         default: return .secondary
         }
     }
@@ -241,11 +256,17 @@ struct QueueRow: View {
         case .extracting, .translating:
             ProgressView().controlSize(.small)
         case .done:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Theme.success)
+                .symbolEffect(.bounce, value: item.status)
         case .failed:
-            Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(Theme.failure)
+                .symbolEffect(.bounce, value: item.status)
         case .duplicate:
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Theme.warning)
+                .symbolEffect(.bounce, value: item.status)
         }
     }
 

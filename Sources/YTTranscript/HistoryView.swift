@@ -11,7 +11,7 @@ struct EntryThumbnail: View {
     var body: some View {
         if let urlString = entry.thumbnailURL, let url = URL(string: urlString) {
             AsyncImage(url: url) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
+                image.resizable().scaledToFill()
             } placeholder: {
                 Color.secondary.opacity(0.15)
             }
@@ -40,18 +40,18 @@ struct RecentRow: View {
     var onRemove: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Theme.Spacing.sm) {
             EntryThumbnail(entry: entry, exists: exists, width: 48)
             Text(entry.title)
                 .font(.callout)
                 .strikethrough(!exists)
-                .foregroundStyle(exists ? Color.primary : Color.red)
+                .foregroundStyle(exists ? Color.primary : Theme.failure)
                 .lineLimit(1)
                 .truncationMode(.middle)
             if !exists {
                 Text("supprimé")
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Theme.failure)
             }
             Spacer()
             Button("Ouvrir") {
@@ -69,6 +69,7 @@ struct RecentRow: View {
                 .help("Retirer de l'historique")
             }
         }
+        .cardBackground()
     }
 }
 
@@ -81,13 +82,13 @@ struct HistoryRow: View {
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Theme.Spacing.md) {
             thumbnail
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.title)
                     .strikethrough(!exists)
-                    .foregroundStyle(exists ? Color.primary : Color.red)
+                    .foregroundStyle(exists ? Color.primary : Theme.failure)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(metadataLine)
@@ -104,7 +105,7 @@ struct HistoryRow: View {
                 if !exists {
                     Text("supprimé")
                         .font(.caption2)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Theme.failure)
                 }
             }
 
@@ -122,7 +123,7 @@ struct HistoryRow: View {
             .buttonStyle(.borderless)
             .help("Retirer de l'historique")
         }
-        .padding(.vertical, 2)
+        .cardBackground()
     }
 
     private var thumbnail: some View {
@@ -241,6 +242,11 @@ struct HistoryView: View {
                             entries = RecentStore.remove(entry.id)
                             AppState.shared.refreshRecents(reload: true)
                         }
+                        // Chrome de liste neutre : la carte (cardBackground)
+                        // porte déjà le fond et la séparation visuelle.
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets())
                     }
                 }
                 .listStyle(.inset)

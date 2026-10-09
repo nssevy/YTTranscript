@@ -35,3 +35,15 @@ line_length:
   error: 160
   ignores_comments: true
   ignores_urls: true
+
+# `id` reste protégé par défaut (très utilisé dans le code existant) ;
+# xs/sm/md/lg/xl sont l'échelle d'espacement façon design tokens, noms
+# courts intentionnels.
+identifier_name:
+  excluded:
+    - id
+    - xs
+    - sm
+    - md
+    - lg
+    - xl
