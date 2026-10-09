@@ -1,6 +1,6 @@
 import Foundation
 
-enum ExtractionError: Error {
+public enum ExtractionError: Error {
     /// yt-dlp est absent du système.
     case ytDlpMissing
     /// Toute autre cause (pas de sous-titres, URL erronée, vidéo privée, réseau…).
@@ -8,33 +8,55 @@ enum ExtractionError: Error {
     case invalidVideo
 }
 
-struct ExtractionResult {
-    let fileURL: URL
-    let transcriptText: String
+public struct ExtractionResult {
+    public let fileURL: URL
+    public let transcriptText: String
     /// Segments nettoyés (timestamps + texte), pour générer le .srt traduit.
     /// Purgés (tableau vidé) une fois l'élément de file terminé, pour ne pas
     /// garder tout le sous-titrage en mémoire.
-    var segments: [VTTParser.Segment]
+    public var segments: [VTTParser.Segment]
     /// Vidéo en anglais → candidate à la traduction française.
-    let sourceIsEnglish: Bool
+    public let sourceIsEnglish: Bool
     /// Sous-titres traduits (.srt), écrits après coup par la file de traduction.
-    var srtURL: URL?
+    public var srtURL: URL?
     // Métadonnées pour l'historique enrichi.
-    let title: String
-    let channel: String?
-    let duration: Double
-    let thumbnailURL: String?
+    public let title: String
+    public let channel: String?
+    public let duration: Double
+    public let thumbnailURL: String?
+
+    public init(
+        fileURL: URL,
+        transcriptText: String,
+        segments: [VTTParser.Segment],
+        sourceIsEnglish: Bool,
+        srtURL: URL?,
+        title: String,
+        channel: String?,
+        duration: Double,
+        thumbnailURL: String?
+    ) {
+        self.fileURL = fileURL
+        self.transcriptText = transcriptText
+        self.segments = segments
+        self.sourceIsEnglish = sourceIsEnglish
+        self.srtURL = srtURL
+        self.title = title
+        self.channel = channel
+        self.duration = duration
+        self.thumbnailURL = thumbnailURL
+    }
 }
 
-struct Extractor {
-    static let ytDlpPath = "/opt/homebrew/bin/yt-dlp"
+public struct Extractor {
+    public static let ytDlpPath = "/opt/homebrew/bin/yt-dlp"
 
-    static var isYtDlpInstalled: Bool {
+    public static var isYtDlpInstalled: Bool {
         FileManager.default.isExecutableFile(atPath: ytDlpPath)
     }
 
     /// Version de yt-dlp (ex. "2026.06.09"), ou nil si absent/illisible.
-    static func ytDlpVersion() -> String? {
+    public static func ytDlpVersion() -> String? {
         guard isYtDlpInstalled else { return nil }
         let (status, out, _) = runProcess(ytDlpPath, ["--version"])
         guard status == 0 else { return nil }
@@ -45,7 +67,7 @@ struct Extractor {
     /// Met à jour yt-dlp. Synchrone : à appeler hors du main thread.
     /// yt-dlp est installé par Homebrew, qui refuse l'auto-update `-U` ;
     /// on passe donc par `brew upgrade yt-dlp`. Retourne un message à afficher.
-    static func updateYtDlp() -> String {
+    public static func updateYtDlp() -> String {
         guard isYtDlpInstalled else {
             return "yt-dlp est introuvable. Installez-le avec : brew install yt-dlp ffmpeg"
         }
@@ -63,18 +85,23 @@ struct Extractor {
     }
 
     /// URL de playlist « pure » (pas une vidéo ouverte dans une playlist).
-    static func isPlaylist(_ url: String) -> Bool {
+    public static func isPlaylist(_ url: String) -> Bool {
         (url.contains("list=") && !url.contains("v=")) || url.contains("/playlist")
     }
 
-    struct PlaylistInfo {
-        let title: String
-        let videoURLs: [String]
+    public struct PlaylistInfo {
+        public let title: String
+        public let videoURLs: [String]
+
+        public init(title: String, videoURLs: [String]) {
+            self.title = title
+            self.videoURLs = videoURLs
+        }
     }
 
     /// Titre + URLs des vidéos d'une playlist (sans télécharger, --flat-playlist).
     /// Synchrone et bloquant : à appeler hors du main thread.
-    static func playlistInfo(_ url: String, limit: Int = 200) throws -> PlaylistInfo {
+    public static func playlistInfo(_ url: String, limit: Int = 200) throws -> PlaylistInfo {
         guard isYtDlpInstalled else { throw ExtractionError.ytDlpMissing }
         let (status, out, _) = runProcess(ytDlpPath, [
             "--flat-playlist", "--dump-single-json", "--playlist-end", String(limit), url,
@@ -98,7 +125,7 @@ struct Extractor {
 
     /// Extrait les sous-titres de la vidéo et écrit le .txt dans `outputDir`.
     /// Synchrone et bloquant : à appeler hors du main thread.
-    static func extract(videoURL: String, outputDir: URL) throws -> ExtractionResult {
+    public static func extract(videoURL: String, outputDir: URL) throws -> ExtractionResult {
         guard FileManager.default.isExecutableFile(atPath: ytDlpPath) else {
             throw ExtractionError.ytDlpMissing
         }
@@ -212,14 +239,19 @@ struct Extractor {
 
     // MARK: - Choix de piste
 
-    struct Track {
-        let lang: String
-        let isAuto: Bool
+    public struct Track {
+        public let lang: String
+        public let isAuto: Bool
+
+        public init(lang: String, isAuto: Bool) {
+            self.lang = lang
+            self.isAuto = isAuto
+        }
     }
 
     /// Manuels prioritaires ; langue d'origine de la vidéo, repli anglais,
     /// puis n'importe quelle piste manuelle disponible.
-    static func pickTrack(videoLang: String?, manual: [String], auto: [String]) -> Track? {
+    public static func pickTrack(videoLang: String?, manual: [String], auto: [String]) -> Track? {
         var candidates: [String] = []
         if let lang = videoLang { candidates.append(lang) }
         candidates.append("en")
@@ -261,13 +293,13 @@ struct Extractor {
 
     /// Durée pour l'en-tête : "mm:ss", ou "h:mm:ss" au-delà d'une heure
     /// (même format que les timestamps du transcript).
-    static func formatDurationHHMM(_ seconds: Double) -> String {
+    public static func formatDurationHHMM(_ seconds: Double) -> String {
         // Troncature (pas d'arrondi) pour coller à la durée affichée par YouTube.
         VTTParser.formatTimestamp(seconds.rounded(.down))
     }
 
     /// Retire les caractères interdits dans un nom de fichier macOS/Finder.
-    static func sanitizeFilename(_ name: String) -> String {
+    public static func sanitizeFilename(_ name: String) -> String {
         let forbidden = CharacterSet(charactersIn: "/\\:?%*|\"<>\0")
         let cleaned = name.components(separatedBy: forbidden).joined(separator: " ")
             .replacingOccurrences(of: " +", with: " ", options: .regularExpression)

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import YTTranscriptCore
 
 /// Miniature vidéo (ou repli icône) commune aux lignes récents/historique.
 struct EntryThumbnail: View {

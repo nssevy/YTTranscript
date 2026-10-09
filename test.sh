@@ -1,34 +1,20 @@
 #!/bin/zsh
-# Compile et exécute les tests unitaires (VTTParser, Extractor.sanitizeFilename).
-# Même contournement VFS que build.sh (bug SwiftBridging des CLT 26.x).
+# Lance les tests (Swift Testing) de YTTranscriptCore via SwiftPM.
+#
+# Pas d'Xcode installé sur cette machine → XCTest n'est pas disponible.
+# On utilise Swift Testing (import Testing, @Test), livré avec le toolchain.
+# `swift test` des Command Line Tools casse sur un bug de liaison du
+# manifeste SwiftPM (CLT 26.x bêta) : on passe donc par le toolchain Swift
+# autonome installé via `brew install swift` (keg-only, n'affecte pas le
+# compilateur système utilisé par build.sh).
 set -euo pipefail
 cd "$(dirname "$0")"
 
-mkdir -p build
-OVERLAY=build/vfs-overlay.yaml
-printf '// vide : masque le doublon SwiftBridging de module.modulemap\n' > build/empty.modulemap
-cat > "$OVERLAY" <<EOF
-{
-  "version": 0,
-  "case-sensitive": "false",
-  "roots": [
-    {
-      "name": "/Library/Developer/CommandLineTools/usr/include/swift",
-      "type": "directory",
-      "contents": [
-        { "name": "module.modulemap", "type": "file",
-          "external-contents": "$PWD/build/empty.modulemap" }
-      ]
-    }
-  ]
-}
-EOF
+SWIFT_BIN="${YTTRANSCRIPT_SWIFT_BIN:-/opt/homebrew/opt/swift/bin/swift}"
+if [[ ! -x "$SWIFT_BIN" ]]; then
+  echo "Toolchain Swift introuvable : $SWIFT_BIN" >&2
+  echo "Installez-le avec : brew install swift" >&2
+  exit 1
+fi
 
-swiftc -parse-as-library \
-  -target arm64-apple-macos15.0 \
-  -Xcc -ivfsoverlay -Xcc "$OVERLAY" \
-  -vfsoverlay "$OVERLAY" \
-  Sources/VTTParser.swift Sources/Extractor.swift Sources/AppModel.swift Tests/Tests.swift \
-  -o build/run-tests
-
-./build/run-tests
+"$SWIFT_BIN" test

@@ -3,13 +3,13 @@ import UserNotifications
 
 /// Notifications macOS : fins de tâche + proposition d'extraction quand une
 /// URL YouTube est copiée (surveillance du presse-papier).
-enum Notifier {
-    static let extractCategory = "YT_URL"
-    static let extractAction = "EXTRACT"
+public enum Notifier {
+    public static let extractCategory = "YT_URL"
+    public static let extractAction = "EXTRACT"
 
     /// À appeler au lancement : enregistre la catégorie « Extraire » et le
     /// délégué qui reçoit les clics sur les notifications.
-    static func configure(delegate: UNUserNotificationCenterDelegate) {
+    public static func configure(delegate: UNUserNotificationCenterDelegate) {
         let center = UNUserNotificationCenter.current()
         let action = UNNotificationAction(identifier: extractAction,
                                           title: "Extraire", options: [])
@@ -21,12 +21,12 @@ enum Notifier {
     }
 
     /// Dialogue système une seule fois.
-    static func requestPermission() {
+    public static func requestPermission() {
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    static func send(title: String, body: String) {
+    public static func send(title: String, body: String) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -35,7 +35,7 @@ enum Notifier {
     }
 
     /// « URL YouTube copiée — Extraire ? » avec bouton d'action.
-    static func promptExtract(url: String) {
+    public static func promptExtract(url: String) {
         let content = UNMutableNotificationContent()
         content.title = "URL YouTube détectée"
         content.body = url

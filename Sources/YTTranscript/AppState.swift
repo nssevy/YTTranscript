@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Translation
 import UserNotifications
+import YTTranscriptCore
 
 /// Un élément de la file d'extraction.
 struct QueueItem: Identifiable {

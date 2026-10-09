@@ -2,12 +2,17 @@ import Foundation
 
 /// Langues cibles proposées pour la traduction .srt.
 /// Le code sert au framework Translation ET au suffixe du fichier (.<code>.srt).
-struct TargetLanguage: Identifiable, Hashable {
-    let code: String
-    let name: String
-    var id: String { code }
+public struct TargetLanguage: Identifiable, Hashable, Sendable {
+    public let code: String
+    public let name: String
+    public var id: String { code }
 
-    static let all: [TargetLanguage] = [
+    public init(code: String, name: String) {
+        self.code = code
+        self.name = name
+    }
+
+    public static let all: [TargetLanguage] = [
         .init(code: "fr", name: "Français"),
         .init(code: "es", name: "Espagnol"),
         .init(code: "de", name: "Allemand"),
@@ -20,7 +25,7 @@ struct TargetLanguage: Identifiable, Hashable {
         .init(code: "ru", name: "Russe"),
     ]
 
-    static func named(_ code: String) -> TargetLanguage {
+    public static func named(_ code: String) -> TargetLanguage {
         all.first { $0.code == code } ?? all[0]
     }
 }
@@ -28,31 +33,51 @@ struct TargetLanguage: Identifiable, Hashable {
 /// Une extraction passée, pour la liste des récents.
 /// Les champs optionnels manquent sur les entrées créées par d'anciennes
 /// versions : l'UI doit prévoir un repli.
-struct RecentEntry: Codable, Identifiable, Hashable {
-    let title: String
-    let txtPath: String
-    let srtPath: String?
-    let date: Date
+public struct RecentEntry: Codable, Identifiable, Hashable, Sendable {
+    public let title: String
+    public let txtPath: String
+    public let srtPath: String?
+    public let date: Date
     /// ID YouTube (ex. "dQw4w9WgXcQ"), optionnel pour les entrées historiques.
-    var videoID: String?
+    public var videoID: String?
     // Métadonnées enrichies (historique v2).
-    var channel: String?
-    var duration: Double?
-    var thumbnailURL: String?
-    var id: String { txtPath }
+    public var channel: String?
+    public var duration: Double?
+    public var thumbnailURL: String?
+    public var id: String { txtPath }
 
-    var txtURL: URL { URL(fileURLWithPath: txtPath) }
-    var srtURL: URL? { srtPath.map { URL(fileURLWithPath: $0) } }
+    public init(
+        title: String,
+        txtPath: String,
+        srtPath: String?,
+        date: Date,
+        videoID: String? = nil,
+        channel: String? = nil,
+        duration: Double? = nil,
+        thumbnailURL: String? = nil
+    ) {
+        self.title = title
+        self.txtPath = txtPath
+        self.srtPath = srtPath
+        self.date = date
+        self.videoID = videoID
+        self.channel = channel
+        self.duration = duration
+        self.thumbnailURL = thumbnailURL
+    }
+
+    public var txtURL: URL { URL(fileURLWithPath: txtPath) }
+    public var srtURL: URL? { srtPath.map { URL(fileURLWithPath: $0) } }
     /// Fichiers à sélectionner dans le Finder.
-    var finderFiles: [URL] { [txtURL] + (srtURL.map { [$0] } ?? []) }
+    public var finderFiles: [URL] { [txtURL] + (srtURL.map { [$0] } ?? []) }
 
     /// Le fichier .txt existe-t-il encore sur le disque ? (false = supprimé)
-    var exists: Bool { FileManager.default.fileExists(atPath: txtPath) }
+    public var exists: Bool { FileManager.default.fileExists(atPath: txtPath) }
 }
 
 /// Extrait l'ID vidéo d'une URL YouTube (watch?v=, youtu.be/, shorts/, embed/).
 /// nil si non reconnu — dans ce cas la détection de doublon est simplement ignorée.
-func youtubeVideoID(from url: String) -> String? {
+public func youtubeVideoID(from url: String) -> String? {
     let patterns = [
         "[?&]v=([A-Za-z0-9_-]{6,})",
         "youtu\\.be/([A-Za-z0-9_-]{6,})",
@@ -69,11 +94,11 @@ func youtubeVideoID(from url: String) -> String? {
 }
 
 /// Persiste les dernières extractions dans UserDefaults (JSON).
-enum RecentStore {
+public enum RecentStore {
     private static let key = "recentExtractions"
     private static let maxCount = 200
 
-    static func load() -> [RecentEntry] {
+    public static func load() -> [RecentEntry] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let entries = try? JSONDecoder().decode([RecentEntry].self, from: data)
         else { return [] }
@@ -87,7 +112,7 @@ enum RecentStore {
     }
 
     /// Ajoute une entrée en tête, dédoublonne par chemin, borne la taille.
-    static func add(_ entry: RecentEntry) -> [RecentEntry] {
+    public static func add(_ entry: RecentEntry) -> [RecentEntry] {
         var entries = load().filter { $0.txtPath != entry.txtPath }
         entries.insert(entry, at: 0)
         entries = Array(entries.prefix(maxCount))
@@ -96,20 +121,20 @@ enum RecentStore {
     }
 
     /// Retire une entrée de l'historique (n'efface pas les fichiers du disque).
-    static func remove(_ id: String) -> [RecentEntry] {
+    public static func remove(_ id: String) -> [RecentEntry] {
         let entries = load().filter { $0.id != id }
         save(entries)
         return entries
     }
 
     /// Vide tout l'historique (ne touche pas aux fichiers du disque).
-    static func clear() {
+    public static func clear() {
         save([])
     }
 
     /// Réécrit les chemins de l'historique après déplacement du dossier de
     /// sortie : préfixe `oldDir` remplacé par `newDir`.
-    static func rebase(from oldDir: String, to newDir: String) -> [RecentEntry] {
+    public static func rebase(from oldDir: String, to newDir: String) -> [RecentEntry] {
         func moved(_ path: String) -> String {
             path.hasPrefix(oldDir + "/")
                 ? newDir + path.dropFirst(oldDir.count)

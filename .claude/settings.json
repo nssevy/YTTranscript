@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/run-tests-on-swift-change.sh",
+            "timeout": 120,
+            "statusMessage": "Lancement des tests Swift…"
+          }
+        ]
+      }
+    ]
+  }
+}

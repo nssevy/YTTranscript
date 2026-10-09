@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Translation
+import YTTranscriptCore
 
 /// Écrans affichés dans la fenêtre unique de l'app.
 enum Screen {

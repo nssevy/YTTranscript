@@ -1,4 +1,5 @@
 import SwiftUI
+import YTTranscriptCore
 
 @main
 struct YTTranscriptApp: App {

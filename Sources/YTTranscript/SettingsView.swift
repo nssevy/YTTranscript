@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import YTTranscriptCore
 
 /// Écran Paramètres, affiché dans la fenêtre principale (comme l'historique).
 struct SettingsView: View {

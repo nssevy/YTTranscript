@@ -3,21 +3,32 @@ import Foundation
 /// Nettoyage des .vtt YouTube : balises retirées, lignes dupliquées
 /// (artefact classique des auto-sous-titres) fusionnées, regroupement
 /// en blocs lisibles avec timestamps.
-enum VTTParser {
-    struct Segment {
-        let start: TimeInterval
-        var end: TimeInterval
-        var text: String
+public enum VTTParser {
+    public struct Segment {
+        public let start: TimeInterval
+        public var end: TimeInterval
+        public var text: String
+
+        public init(start: TimeInterval, end: TimeInterval, text: String) {
+            self.start = start
+            self.end = end
+            self.text = text
+        }
     }
 
-    struct Chapter {
-        let start: TimeInterval
-        let title: String
+    public struct Chapter {
+        public let start: TimeInterval
+        public let title: String
+
+        public init(start: TimeInterval, title: String) {
+            self.start = start
+            self.title = title
+        }
     }
 
     // MARK: - Parsing
 
-    static func parse(_ vtt: String) -> [Segment] {
+    public static func parse(_ vtt: String) -> [Segment] {
         var cues: [Segment] = []
         var currentStart: TimeInterval?
         var currentEnd: TimeInterval = 0
@@ -114,7 +125,7 @@ enum VTTParser {
     }
 
     /// "00:01:23.456" ou "01:23.456" → secondes.
-    static func parseTimestamp(_ raw: String) -> TimeInterval {
+    public static func parseTimestamp(_ raw: String) -> TimeInterval {
         let parts = raw.split(separator: ":").map { Double($0) ?? 0 }
         switch parts.count {
         case 3: return parts[0] * 3600 + parts[1] * 60 + parts[2]
@@ -127,7 +138,7 @@ enum VTTParser {
 
     /// Fusionne les cues en blocs d'environ 300 caractères, timestamp au début
     /// de chaque bloc, chapitres insérés à leur position.
-    static func render(segments: [Segment], chapters: [Chapter]) -> String {
+    public static func render(segments: [Segment], chapters: [Chapter]) -> String {
         var lines: [String] = []
         var remainingChapters = chapters
 
@@ -164,13 +175,13 @@ enum VTTParser {
     }
 
     /// Largeur de ligne .srt par défaut : 2 lignes de ~42 caractères (norme lisible).
-    static let defaultSRTLineWidth = 42
+    public static let defaultSRTLineWidth = 42
 
     /// Regroupe les segments bruts en blocs courts, lisibles à l'écran.
     /// Les auto-subs YouTube produisent des cues qui se chevauchent et durent
     /// parfois 10 ms (« flash »). On fusionne jusqu'à 2 lignes de `lineWidth`
     /// caractères / une fin de phrase, borne dure à 6 s.
-    static func groupForSRT(_ segments: [Segment],
+    public static func groupForSRT(_ segments: [Segment],
                             lineWidth: Int = defaultSRTLineWidth) -> [Segment] {
         let srtMaxChars = lineWidth * 2
         var groups: [Segment] = []
@@ -200,7 +211,7 @@ enum VTTParser {
 
     /// Fichier .srt à partir des blocs regroupés et de leurs textes traduits
     /// (même ordre, même nombre). Timestamps d'origine conservés.
-    static func renderSRT(segments: [Segment], translatedTexts: [String],
+    public static func renderSRT(segments: [Segment], translatedTexts: [String],
                           lineWidth: Int = defaultSRTLineWidth) -> String {
         var blocks: [String] = []
         for (index, segment) in segments.enumerated() {
@@ -236,7 +247,7 @@ enum VTTParser {
     }
 
     /// "HH:MM:SS,mmm" (format SRT).
-    static func formatSRTTimestamp(_ seconds: TimeInterval) -> String {
+    public static func formatSRTTimestamp(_ seconds: TimeInterval) -> String {
         let total = Int(seconds)
         let millis = Int((seconds - Double(total)) * 1000)
         return String(format: "%02d:%02d:%02d,%03d",
@@ -244,7 +255,7 @@ enum VTTParser {
     }
 
     /// "[mm:ss]" en dessous d'une heure, "[h:mm:ss]" au-delà.
-    static func formatTimestamp(_ seconds: TimeInterval) -> String {
+    public static func formatTimestamp(_ seconds: TimeInterval) -> String {
         let total = Int(seconds)
         if total >= 3600 {
             return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
