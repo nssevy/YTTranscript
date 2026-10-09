@@ -84,6 +84,15 @@ public struct Extractor {
         return "yt-dlp est à jour\(version)."
     }
 
+    /// Homebrew connaît-il une version plus récente de yt-dlp que celle
+    /// installée ? Synchrone et bloquant : à appeler hors du main thread.
+    public static func isUpdateAvailable() -> Bool {
+        let brewPath = "/opt/homebrew/bin/brew"
+        guard FileManager.default.isExecutableFile(atPath: brewPath) else { return false }
+        let (_, out, _) = runProcess(brewPath, ["outdated", "--quiet", "yt-dlp"])
+        return out.contains("yt-dlp")
+    }
+
     /// URL de playlist « pure » (pas une vidéo ouverte dans une playlist).
     public static func isPlaylist(_ url: String) -> Bool {
         (url.contains("list=") && !url.contains("v=")) || url.contains("/playlist")
